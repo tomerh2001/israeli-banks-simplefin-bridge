@@ -7,6 +7,8 @@ const xoConfig = [
 		space: false,
 		rules: {
 			'no-console': 'off',
+			'@stylistic/object-curly-newline': 'off',
+			'@stylistic/object-property-newline': 'off',
 			'capitalized-comments': 'off',
 			complexity: 'off',
 			'max-params': 'off',

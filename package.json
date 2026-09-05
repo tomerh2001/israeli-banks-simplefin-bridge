@@ -38,7 +38,7 @@
     "@types/node": "^24.9.1",
     "semantic-release": "^25.0.2",
     "tsx": "^4.21.0",
-    "typescript": "^5.9.3",
+    "typescript": "^6",
     "vitest": "^3.2.4",
     "xo": "^4.0.0"
   },
