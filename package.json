@@ -1,0 +1,46 @@
+{
+  "name": "israeli-banks-simplefin-bridge",
+  "description": "Self-hosted SimpleFIN bridge for Israeli banks and credit cards, powered by israeli-bank-scrapers. Feeds Securo, Actual Budget and CSV consumers.",
+  "version": "0.0.0-development",
+  "author": "Tomer Horowitz",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=22.22.2"
+  },
+  "bin": {
+    "bridge": "dist/cli.js"
+  },
+  "scripts": {
+    "start": "node dist/index.js",
+    "dev": "tsx src/index.ts",
+    "cli": "tsx src/cli.ts",
+    "build": "tsc -p tsconfig.build.json",
+    "lint": "xo .",
+    "typecheck": "tsc --noEmit",
+    "test:unit": "vitest run",
+    "test": "yarn lint && yarn typecheck && yarn test:unit"
+  },
+  "dependencies": {
+    "@hono/node-server": "^1.19.6",
+    "cronstrue": "^3.9.0",
+    "hono": "^4.10.7",
+    "israeli-bank-scrapers": "6.9.0",
+    "moment-timezone": "^0.5.48",
+    "node-cron": "^4.2.1",
+    "zod": "^4.1.12"
+  },
+  "devDependencies": {
+    "@codedependant/semantic-release-docker": "^5.1.1",
+    "@semantic-release/commit-analyzer": "^13.0.1",
+    "@semantic-release/github": "^12.0.2",
+    "@semantic-release/release-notes-generator": "^14.1.0",
+    "@types/node": "^24.9.1",
+    "semantic-release": "^25.0.2",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4",
+    "xo": "^4.0.0"
+  },
+  "packageManager": "yarn@4.12.0"
+}

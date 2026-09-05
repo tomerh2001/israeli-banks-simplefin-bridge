@@ -1,0 +1,20 @@
+{
+    "branches": [
+        "main",
+        {
+            "name": "develop",
+            "prerelease": "beta",
+            "channel": "beta"
+        }
+    ],
+    "plugins": [
+        "@semantic-release/commit-analyzer",
+        "@semantic-release/release-notes-generator",
+        "@semantic-release/github",
+        ["@codedependant/semantic-release-docker", {
+            "dockerImage": "israeli-banks-simplefin-bridge",
+            "dockerProject": "tomerh2001",
+            "dockerRegistry": "ghcr.io"
+        }]
+    ]
+}

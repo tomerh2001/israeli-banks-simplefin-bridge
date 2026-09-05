@@ -1,0 +1,36 @@
+{
+  "$schema": "./config.schema.json",
+  "schedule": "0 6,18 * * *",
+  "timezone": "Asia/Jerusalem",
+  "currency": "ILS",
+  "staleHours": 30,
+  "overlapDays": 30,
+  "companies": {
+    "hapoalim": {
+      "label": "Bank Hapoalim",
+      "kind": "checking",
+      "credentials": {
+        "userCode": "op://Home Server/Bank Hapoalim/userCode",
+        "password": "op://Home Server/Bank Hapoalim/password"
+      },
+      "accounts": "all"
+    },
+    "visaCal": {
+      "label": "Visa Cal",
+      "kind": "credit_card",
+      "credentials": {
+        "username": "op://Home Server/Visa Cal/username",
+        "password": "op://Home Server/Visa Cal/password"
+      },
+      "accounts": "all",
+      "chargeDay": 10,
+      "synthesizePayments": false
+    }
+  },
+  "server": {
+    "publicUrl": "http://israeli-banks-bridge:8080",
+    "port": 8080,
+    "claimTtlMinutes": 15,
+    "maxClaims": 3
+  }
+}
