@@ -23,7 +23,8 @@
 # the upstream noVNC tarball would shave ~300 MB if size ever matters.
 
 # ---------------------------------------------------------------------------
-FROM ghcr.io/puppeteer/puppeteer:latest AS base
+# Match the Puppeteer version resolved in yarn.lock; update the base and lock together.
+FROM ghcr.io/puppeteer/puppeteer:24.43.1 AS base
 
 USER root
 
@@ -79,6 +80,18 @@ COPY --chown=pptruser:pptruser .yarn .yarn
 RUN yarn workspaces focus --all --production \
 	&& yarn cache clean --all \
 	&& rm -rf .yarn/cache .yarn/install-state.gz
+
+# A moving base can silently pair a newer Chrome with an older application driver.
+# Check the installed runtime dependency and the actual binary before publishing.
+RUN node <<'NODE'
+const assert = require('node:assert/strict');
+const {execFileSync} = require('node:child_process');
+const {PUPPETEER_REVISIONS} = require('puppeteer');
+const output = execFileSync(process.env.PUPPETEER_EXECUTABLE_PATH, ['--version'], {encoding: 'utf8'}).trim();
+const actual = output.match(/\b(\d+\.\d+\.\d+\.\d+)\b/)?.[1];
+assert.equal(actual, PUPPETEER_REVISIONS.chrome, `Bundled Chrome (${output}) must match Puppeteer (${PUPPETEER_REVISIONS.chrome})`);
+console.log(`Verified Puppeteer browser: Chrome ${actual}`);
+NODE
 
 COPY --from=build --chown=pptruser:pptruser /app/dist dist
 COPY --chown=pptruser:pptruser config.example.json ./
