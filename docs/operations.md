@@ -126,3 +126,15 @@ docker compose pull && docker compose up -d
 
 Logs never contain credentials, account numbers, descriptions or amounts at info level; set `VERBOSE=1` for
 row-level debug output when reproducing a problem, and unset it afterwards.
+
+
+## Dependency audit, 2026-09-07
+
+A production-only Yarn audit reports `extract-zip@2.0.1` through `@puppeteer/browsers@2.13.2`:
+[GHSA-jmr9-qjv8-65gv](https://github.com/advisories/GHSA-jmr9-qjv8-65gv). The advisory lists no patched version.
+It concerns extracting malicious ZIP archives. In the inspected dependency, the caller is the browser-install
+path (`@puppeteer/browsers/lib/cjs/install.js` -> `fileUtil.js`). This deployment sets
+`PUPPETEER_SKIP_DOWNLOAD=1` and launches the Chrome already bundled in the image through an explicit executable
+path. Routine bridge scraping does not invoke that archive installer. This limits exposure for the deployed
+path; it does not remove the vulnerable dependency. Recheck the advisory when updating the scraper/browser
+packages or changing browser installation behavior.
