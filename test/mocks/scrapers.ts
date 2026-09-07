@@ -27,12 +27,16 @@ export type FakeBrowser = {
 };
 
 type FrameLike = {url(): string};
+type FakeOtpHandle = {dispose: ReturnType<typeof vi.fn>};
+type FakeWaitOptions = {visible?: boolean; timeout?: number; signal: AbortSignal};
 
 export type FakePage = {
 	handlers: Map<string, Array<(frame: FrameLike) => void>>;
 	on(event: string, handler: (frame: FrameLike) => void): void;
 	mainFrame(): FrameLike;
 	navigate(url: string): void;
+	waitForSelector: ReturnType<typeof vi.fn<(selector: string, options: FakeWaitOptions) => Promise<FakeOtpHandle>>>;
+	otpHandle: FakeOtpHandle;
 };
 
 export type ScraperMockBehaviour = {
@@ -48,6 +52,8 @@ export type ScraperMockBehaviour = {
 	throwError?: Error;
 	/** Main-frame URL to "navigate" to before returning the result. */
 	pageUrl?: string;
+	/** Whether a visible Hapoalim OTP form is present during login. */
+	otpFormVisible?: boolean;
 };
 
 type ScraperMockState = {
@@ -92,10 +98,25 @@ function createFakeBrowser(): FakeBrowser {
 	return browser;
 }
 
-function createFakePage(): FakePage {
+function createFakePage(browser: FakeBrowser | undefined, behaviour: ScraperMockBehaviour): FakePage {
 	let currentUrl = 'about:blank';
 	const frame: FrameLike = {url: () => currentUrl};
 	const page: FakePage = {
+		otpHandle: {dispose: vi.fn(async () => undefined)},
+		waitForSelector: vi.fn(async (_selector: string, options: FakeWaitOptions) => {
+			if (behaviour.otpFormVisible) {
+				return page.otpHandle;
+			}
+
+			return new Promise<never>((_resolve, reject) => {
+				options.signal.addEventListener('abort', () => {
+					reject(new Error('selector wait aborted'));
+				}, {once: true});
+				void browser?.closedPromise.then(() => {
+					reject(new Error('page closed'));
+				});
+			});
+		}),
 		handlers: new Map(),
 		on(event, handler) {
 			const list = page.handlers.get(event) ?? [];
@@ -142,7 +163,7 @@ export function createScraper(options: Record<string, unknown>) {
 			}
 
 			if (typeof options.preparePage === 'function') {
-				const page = createFakePage();
+				const page = createFakePage(browser, behaviour);
 				scraperMock.pages.push(page);
 				await (options.preparePage as (page: FakePage) => Promise<void>)(page);
 				if (behaviour.pageUrl) {

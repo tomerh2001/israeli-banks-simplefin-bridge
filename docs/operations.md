@@ -61,6 +61,12 @@ between importers. Existing device trust may have expired, so verify the result 
 Device trust lives in the company's Chrome profile (`data/chrome/<company>`). Re-enrol when the bank asks for a code
 again (profile deleted, cookies expired, bank policy change), which surfaces as `OTP_REQUIRED`.
 
+Hapoalim can display its SMS form on the same ordinary login URL. The runner watches for the visible
+`form.auth-otp-login` before the scraper closes Chrome and retains only that boolean observation. If the run
+then ends with a generic error or timeout, it reports `OTP_REQUIRED` and parks the company for assisted login.
+A hidden form or ordinary login URL does not establish an OTP challenge; explicit credential errors and
+successful results retain their original meaning.
+
 ```sh
 docker compose stop israeli-banks-bridge                  # never run two Chromes on one profile
 COMPANY=hapoalim docker compose --profile bootstrap run --rm israeli-banks-bridge-login
@@ -89,7 +95,9 @@ published deployment image still uses its moving `latest` tag.
 
 On 2026-09-07, the former `puppeteer:latest` base supplied Chrome `152.0.7977.75` while the application still
 loaded Puppeteer `24.43.1`. That mismatch was found during CAL page-closure and Hapoalim login investigations.
-Matching the versions removes this compatibility variable; it does not establish that either bank login works.
+After deployment with the matching pair, local page rendering passed and CAL's assisted login reached
+`LOGIN_SUCCESS`; the former Chrome 152 run had lost its page before login. A successful assisted login verifies
+authentication only: check the normal scrape and destination sync separately before enabling unattended import.
 [Puppeteer's supported-browser list](https://pptr.dev/supported-browsers) maps the tested browser pairs.
 
 Upgrading only `israeli-bank-scrapers` from `6.9.0` to `6.11.0` does not change its Hapoalim, CAL, or browser-base
