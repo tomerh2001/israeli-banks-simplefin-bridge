@@ -1,0 +1,231 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/tomerh2001/israeli-banks-simplefin-bridge/blob/main/config.schema.json",
+  "title": "israeli-banks-simplefin-bridge configuration",
+  "description": "config.json for israeli-banks-simplefin-bridge. Credential values may be literal strings or op://<vault>/<item>/<field> references resolved through 1Password Connect.",
+  "type": "object",
+  "properties": {
+    "schedule": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Cron expression for scheduled scrapes (5 fields, evaluated in `timezone`). Omit for one-shot mode via the CLI. The SCHEDULE env var overrides it."
+    },
+    "timezone": {
+      "default": "Asia/Jerusalem",
+      "type": "string",
+      "description": "IANA timezone used for calendar dates. Default Asia/Jerusalem."
+    },
+    "currency": {
+      "default": "ILS",
+      "type": "string",
+      "pattern": "^[A-Z]{3}$",
+      "description": "Default account currency (ISO-4217) when a scraper does not say. Default ILS."
+    },
+    "staleHours": {
+      "default": 30,
+      "type": "integer",
+      "minimum": 1,
+      "description": "/healthz returns 503 when an enabled company has no successful scrape within this many hours. Default 30."
+    },
+    "overlapDays": {
+      "default": 30,
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 365,
+      "description": "Days re-scraped on every run to catch late postings (window starts at lastSuccess - overlapDays). Default 30."
+    },
+    "maxLoginAttemptsPerDay": {
+      "default": 2,
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 20,
+      "description": "Max login attempts per company per calendar day (bank lockout guard). Default 2."
+    },
+    "companies": {
+      "type": "object",
+      "propertyNames": {
+        "enum": [
+          "amex",
+          "behatsdaa",
+          "beinleumi",
+          "beyahadBishvilha",
+          "discount",
+          "hapoalim",
+          "isracard",
+          "leumi",
+          "massad",
+          "max",
+          "mercantile",
+          "mizrahi",
+          "oneZero",
+          "otsarHahayal",
+          "pagi",
+          "union",
+          "visaCal",
+          "yahav"
+        ]
+      },
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "default": true,
+            "type": "boolean",
+            "description": "Disabled companies are never scraped and never served. Default true."
+          },
+          "label": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Human label used for SimpleFIN connection/account names and logs."
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "checking",
+              "credit_card",
+              "savings",
+              "investment"
+            ],
+            "description": "Default kind for every account of this company (checking, credit_card, savings, investment)."
+          },
+          "credentials": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {
+              "type": "string",
+              "minLength": 1
+            },
+            "description": "Credential fields exactly as israeli-bank-scrapers expects them (userCode/password, username/password, id/card6Digits/password, ...). Values may be literal strings or op://<vault>/<item>/<field> references."
+          },
+          "accounts": {
+            "default": "all",
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "all"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            ],
+            "description": "Scraper accountNumber filter: \"all\" or a list of account numbers. Default \"all\"."
+          },
+          "startDate": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+            "description": "Lower bound for scraping, YYYY-MM-DD. Each scraper clamps to its own max lookback."
+          },
+          "additionalTransactionInformation": {
+            "default": false,
+            "type": "boolean",
+            "description": "israeli-bank-scrapers option; slower, more bot-detection exposure, may change identifiers for some banks. Default false."
+          },
+          "includePending": {
+            "default": false,
+            "type": "boolean",
+            "description": "Serve pending rows to consumers. Default false (pending ids are unstable for several companies)."
+          },
+          "futureMonthsToScrape": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 12,
+            "description": "israeli-bank-scrapers option (credit cards): how many future billing months to scrape."
+          },
+          "dateMode": {
+            "default": "purchase",
+            "type": "string",
+            "enum": [
+              "purchase",
+              "charge"
+            ],
+            "description": "Which date becomes the row date: purchase/event date (\"purchase\") or bank charge/billing date (\"charge\"). Default purchase."
+          },
+          "chargeDay": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 31,
+            "description": "Credit cards only: day of month the bank account is debited for the bill. Used for documentation and synthetic payments."
+          },
+          "synthesizePayments": {
+            "default": false,
+            "type": "boolean",
+            "description": "Credit cards only, opt-in: emit one synthetic positive \"card payment\" row per charge date. Default false."
+          },
+          "timeoutMinutes": {
+            "default": 20,
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 120,
+            "description": "Wall-clock limit for one scrape of this company, in minutes. Default 20."
+          },
+          "scraperOptions": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {},
+            "description": "Extra israeli-bank-scrapers options passed through verbatim (e.g. optInFeatures, viewportSize)."
+          }
+        },
+        "required": [
+          "label",
+          "kind",
+          "credentials"
+        ]
+      },
+      "description": "One entry per bank/card company, keyed by the israeli-bank-scrapers company id."
+    },
+    "server": {
+      "default": {},
+      "type": "object",
+      "properties": {
+        "publicUrl": {
+          "default": "http://israeli-banks-bridge:8080",
+          "type": "string",
+          "format": "uri",
+          "description": "Base URL consumers use to reach this bridge, no trailing slash. Default http://israeli-banks-bridge:8080."
+        },
+        "port": {
+          "default": 8080,
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535,
+          "description": "Listen port. Default 8080."
+        },
+        "host": {
+          "default": "0.0.0.0",
+          "type": "string",
+          "description": "Listen host. Default 0.0.0.0."
+        },
+        "claimTtlMinutes": {
+          "default": 15,
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1440,
+          "description": "Setup tokens expire this many minutes after minting. Default 15."
+        },
+        "maxClaims": {
+          "default": 3,
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10,
+          "description": "A setup token may be claimed at most this many times (until the first successful authenticated GET). Default 3."
+        }
+      },
+      "description": "SimpleFIN server settings."
+    },
+    "$schema": {
+      "type": "string",
+      "description": "JSON Schema reference for editor support."
+    }
+  },
+  "required": [
+    "companies"
+  ]
+}

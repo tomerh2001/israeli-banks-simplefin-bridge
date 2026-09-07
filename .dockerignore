@@ -1,0 +1,41 @@
+# Build context for the Dockerfile: sources, lockfile and the yarn release only.
+.git
+.github
+.gitignore
+.dockerignore
+Dockerfile
+compose.yml
+compose.*.yml
+
+node_modules
+dist
+coverage
+*.tsbuildinfo
+.eslintcache
+
+# yarn state (the pinned release under .yarn/releases IS needed)
+.yarn/cache
+.yarn/unplugged
+.yarn/build-state.yml
+.yarn/install-state.gz
+.pnp.*
+
+# tests
+test
+**/*.test.ts
+vitest.config.ts
+
+# runtime state and secrets: never bake into an image
+data
+chrome
+chrome-data
+screenshots
+secrets
+config.json
+*.sqlite
+*.sqlite-*
+.env*
+
+# docs (not copied into the image; keeps the context small)
+docs
+*.md

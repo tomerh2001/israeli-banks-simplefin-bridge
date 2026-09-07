@@ -146,5 +146,5 @@ data/
 *.sqlite-*
 chrome/
 screenshots/
-secrets/
+/secrets/
 config.json

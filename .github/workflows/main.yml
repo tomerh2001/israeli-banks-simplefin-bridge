@@ -4,11 +4,9 @@ on:
   push:
     branches:
       - main
-      - develop
   pull_request:
     branches:
       - main
-      - develop
 
 jobs:
   validate:
@@ -29,12 +27,17 @@ jobs:
 
       - name: Install Dependencies
         run: yarn install --immutable
+        env:
+          PUPPETEER_SKIP_DOWNLOAD: "1"
 
       - name: Run Test Suite
         run: yarn test
 
+      - name: Check config.schema.json is up to date
+        run: yarn schema && git diff --exit-code -- config.schema.json
+
   release:
-    if: ${{ github.event_name == 'push' }}
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
     needs: validate
     runs-on: ubuntu-latest
     permissions:
@@ -43,12 +46,7 @@ jobs:
       pull-requests: write
       id-token: write
       packages: write
-    env:
-      GH_TOKEN: ${{ github.token }}
-      DOCKER_REGISTRY_USER: ${{ github.actor }}
-      DOCKER_REGISTRY_PASSWORD: ${{ github.token }}
     steps:
-
       - name: Checkout
         uses: actions/checkout@v4
 
@@ -64,10 +62,14 @@ jobs:
 
       - name: Install Dependencies
         run: yarn install --immutable
+        env:
+          PUPPETEER_SKIP_DOWNLOAD: "1"
 
       - name: Make repo writable for BuildKit
         run: sudo chmod -R 777 "$GITHUB_WORKSPACE/.yarn"
 
+      # Builds the Dockerfile and pushes ghcr.io/tomerh2001/israeli-banks-simplefin-bridge
+      # tagged latest, <version> and <major>-latest (see .releaserc).
       - name: Semantic Release
         run: yarn semantic-release
         env:

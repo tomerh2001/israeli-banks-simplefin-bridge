@@ -72,7 +72,7 @@ export type ServerConfig = {
 	host: string;
 	/** Setup tokens expire this many minutes after minting. Default 15. */
 	claimTtlMinutes: number;
-	/** A setup token may be claimed at most this many times (until the first successful authenticated GET). Default 3. */
+	/** Maximum setup-token claims within its TTL, including partially failed connection retries. Default 3. */
 	maxClaims: number;
 };
 
@@ -149,6 +149,8 @@ export type LedgerTransaction = {
 	description: string;
 	memo: string | undefined;
 	status: TransactionStatus;
+	/** When an existing pending row first became posted; used to deliver late completions. */
+	postedSeenAt?: IsoDateTime;
 	installmentNumber: number | undefined;
 	installmentTotal: number | undefined;
 	originalAmount: number | undefined;
@@ -287,7 +289,7 @@ export type Consumer = {
 	basicUser: string;
 	/** scrypt hash of the Basic-auth secret, encoded `scrypt$<saltB64>$<hashB64>`. */
 	secretHash: string;
-	/** Plain secret, retained only until the first successful authenticated GET (so a re-claim can return the same Access URL), then null. */
+	/** Plain secret, retained only while the claim TTL and attempt limit allow a retry. */
 	secretPlain: string | undefined;
 	/** One-time claim id embedded in the setup token URL. */
 	claimId: string | undefined;

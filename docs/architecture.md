@@ -33,8 +33,9 @@
 | `src/scrape/`               | Scheduler, per-company runner (browser launch, timeouts, profiles, backoff/parking), assisted login, synthetic card payments. |
 | `src/secrets/onepassword.ts`| `op://` resolution through the 1Password Connect REST API, credential fingerprints.                |
 | `src/export/csv.ts`         | Securo-import-compatible CSV export.                                                               |
-| `src/cli.ts`                | `bridge` command line.                                                                             |
-| `src/index.ts`              | Process entry: load config, open ledger, start server + scheduler.                                 |
+| `src/cli.ts`, `src/cli/`   | `bridge` command line (argument parsing and table rendering live in `src/cli/args.ts`).             |
+| `src/serve.ts`              | Shared bootstrap: env, config, data dirs, ledger, secrets; `serve()` = server + scheduler + graceful shutdown. |
+| `src/index.ts`              | Process entry: `serve()` with SIGINT/SIGTERM handling (same as `bridge serve`).                     |
 
 ## Id scheme (`ID_SCHEME_VERSION = 1`)
 
@@ -42,7 +43,7 @@ Consumers dedup on `(account, transaction id)` only, so ids must be **unique per
 Scraper identifiers alone are neither: Hapoalim reuses institution codes across rows, Visa Cal pending rows have
 none, Max emits the literal string `undefined`, Isracard/Amex may repeat voucher numbers across installment months.
 
-- Account id: `<companyId>:<accountNumber>` (e.g. `hapoalim:12-627-187430`, `visaCal:1234`).
+- Account id: `<companyId>:<accountNumber>` (e.g. `hapoalim:00-000-000001`, `visaCal:1234`).
 - Transaction id: `<companyId>:<accountNumber>:<identifier|->:<fp>` where
   - `identifier` is the scraper identifier when usable. Unusable = `undefined`, `null`, empty, numeric `0`,
     or any string starting with `undefined`.
@@ -62,7 +63,8 @@ written with a different version.
   (purchase/event date) or, with `dateMode: "charge"`, of `processedDate`.
 - `chargeDate` = calendar date of `processedDate` (bank charge/billing date) when present.
 - SimpleFIN `posted` = `Date.UTC(y, m, d, 12)` of `bookedDate` so a consumer converting to a UTC date never
-  shifts the day. `transacted_at` = same for the purchase date.
+  shifts the day. `transacted_at` uses the same booked date. In charge-date mode the purchase date remains
+  in the raw ledger data; it is not exposed separately in the SimpleFIN payload.
 - `amount` = scraper `chargedAmount` (signed; negative = money out, already in the account currency). Fallback
   to `originalAmount` only when `chargedAmount` is missing and the currencies match.
 - Currency symbols/strings from scrapers are normalised to ISO-4217 (`₪`, `ש"ח`, `NIS`, `ILS(₪)` -> `ILS`;
@@ -73,10 +75,19 @@ written with a different version.
 
 A transaction's `id`, `amount`, `bookedDate` and `description` never change after first insert. Later scrapes
 only refresh `lastSeen`, `status` (pending -> posted), `chargeDate`, `category`, `memo`, `raw`. If a frozen field
-comes back different, an **anomaly** is recorded (and surfaced by `bridge status`/`bridge audit`) instead of being
+comes back different **under the same id**, an **anomaly** is recorded (and surfaced by `bridge status`/`bridge audit`) instead of being
 applied, because consumers never update amounts either.
 
-Pending rows are stored but **not served** unless `includePending` is on for the company.
+The id includes date, amount, description, memo and installment fields. A source correction to one of those
+fields normally produces a new id, so it can appear as a second transaction. Reused bank identifiers make
+automatic merging ambiguous; compare affected source statements and consumer rows after scraper upgrades.
+`bridge audit` can find identical-looking duplicates but does not reliably identify corrections whose fields differ.
+
+Pending rows are stored but **not served** unless `includePending` is on for the company; vanished pending
+rows are omitted after the next successful account scrape. A pending-to-posted transition records
+`postedSeenAt` once. A date window includes rows by booked date or by `firstSeen`/`postedSeenAt`, preserving
+late arrivals beyond a consumer's usual rewind. The exclusive booked-date upper bound still excludes future
+installments. Repeated windows return the same ids; serving one consumer never consumes rows for another.
 
 ## SimpleFIN server
 
@@ -84,18 +95,21 @@ See [`docs/securo-simplefin-contract.md`](./securo-simplefin-contract.md) for th
 Securo exercises. Summary:
 
 - `POST /simplefin/claim/<claimId>` -> `200 text/plain` Access URL `http://<user>:<secret>@<host>/simplefin`.
-  A claim id is valid `server.claimTtlMinutes` and may be claimed up to `server.maxClaims` times, but never after
-  the first successful authenticated GET. Afterwards `403`.
+  A claim id is valid `server.claimTtlMinutes` and may be claimed up to `server.maxClaims` times, including after
+  an authenticated GET so a partially failed consumer connection can retry. Afterwards `403`. Plain setup
+  credentials are erased on the final allowed claim, at startup if expired, and by a one-minute expiry sweep.
 - `GET /simplefin/accounts` (Basic) with `version`, `pending`, `account`, `start-date`, `end-date`,
   `balances-only` -> union of v1 and v2 shapes.
 - `GET /simplefin/info` -> `{"versions":["1","2"]}`.
-- `GET /healthz` (no auth) -> `200` or `503` with a `HealthReport`.
+- `GET /healthz` (no auth) -> `200` or `503` with a `HealthReport`. A company is healthy iff enabled, not parked and
+  successfully scraped within `staleHours`; the bridge is ok iff at least one company is enabled and all enabled ones are healthy.
 - `GET /export/transactions.csv` (Basic) -> Securo CSV import columns.
 - Never redirects. Never forwards bank page text in error messages.
 
 ## Scraping
 
-- Sequential per company; an in-process guard prevents overlapping runs.
+- Sequential per company; an in-process guard prevents overlapping runs. Separate CLI processes do not share
+  that guard: stop the scheduled service before an assisted login or manual scrape using the same profile.
 - Scrape window start = `max(config.startDate, lastSuccessAt - overlapDays)`; the scraper clamps further.
 - Per-company wall-clock limit (`timeoutMinutes`), then the browser is killed and the run is marked `timeout`.
 - Backoff after `TIMEOUT`/`GENERIC`: 1h, then 3h, then the next scheduled slot.
@@ -156,4 +170,5 @@ an isolated network with the port published on `127.0.0.1` only.
 | `SHOW_BROWSER` | `0` | Headed Chrome (needs a display). |
 | `NOVNC_PASSWORD` | random | Assisted-login VNC password. |
 | `VERBOSE` | `0` | Row-level debug logging. |
+| `ONE_SHOT` | `0` | With no schedule: `serve` scrapes every enabled company once, then exits (1 when any run failed). |
 | `TZ` | `Asia/Jerusalem` | |

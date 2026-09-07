@@ -1,0 +1,84 @@
+{
+	"success": true,
+	"accounts": [
+		{
+			"accountNumber": "1234",
+			"balance": -2345.6,
+			"balanceDate": "2024-03-02T00:00:00.000Z",
+			"cardFrame": 20000,
+			"cardType": "bankIssued",
+			"txns": [
+				{
+					"identifier": 987654321,
+					"type": "installments",
+					"status": "completed",
+					"date": "2024-02-14T22:00:00.000Z",
+					"processedDate": "2024-03-01T22:00:00.000Z",
+					"originalAmount": -1200,
+					"originalCurrency": "₪",
+					"chargedAmount": -400,
+					"chargedCurrency": "₪",
+					"description": "KSP",
+					"memo": "תשלום 1 מתוך 3",
+					"category": "מחשבים",
+					"installments": {"number": 1, "total": 3}
+				},
+				{
+					"identifier": 987654321,
+					"type": "installments",
+					"status": "completed",
+					"date": "2024-03-14T22:00:00.000Z",
+					"processedDate": "2024-04-01T21:00:00.000Z",
+					"originalAmount": -1200,
+					"originalCurrency": "₪",
+					"chargedAmount": -400,
+					"chargedCurrency": "₪",
+					"description": "KSP",
+					"memo": "תשלום 2 מתוך 3",
+					"category": "מחשבים",
+					"installments": {"number": 2, "total": 3}
+				},
+				{
+					"type": "normal",
+					"status": "pending",
+					"date": "2024-03-05T10:15:00.000Z",
+					"processedDate": "2024-03-05T10:15:00.000Z",
+					"originalAmount": -89.9,
+					"originalCurrency": "₪",
+					"chargedAmount": -89.9,
+					"description": "WOLT",
+					"memo": "",
+					"category": "מסעדות"
+				},
+				{
+					"identifier": 987650000,
+					"type": "normal",
+					"status": "completed",
+					"date": "2024-02-20T22:00:00.000Z",
+					"processedDate": "2024-03-01T22:00:00.000Z",
+					"originalAmount": 150,
+					"originalCurrency": "₪",
+					"chargedAmount": 150,
+					"chargedCurrency": "₪",
+					"description": "ZARA",
+					"memo": "זיכוי",
+					"category": "אופנה"
+				},
+				{
+					"identifier": 987651111,
+					"type": "normal",
+					"status": "completed",
+					"date": "2024-02-22T22:00:00.000Z",
+					"processedDate": "2024-03-01T22:00:00.000Z",
+					"originalAmount": -25,
+					"originalCurrency": "$",
+					"chargedAmount": -92.75,
+					"chargedCurrency": "₪",
+					"description": "  AMAZON.COM  ",
+					"memo": "",
+					"category": ""
+				}
+			]
+		}
+	]
+}
