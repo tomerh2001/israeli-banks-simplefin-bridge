@@ -28,7 +28,7 @@
     "cronstrue": "^3.9.0",
     "hono": "^4.10.7",
     "israeli-bank-scrapers": "6.11.0",
-    "moment-timezone": "^0.5.48",
+    "moment-timezone": "^0.6.0",
     "node-cron": "^4.2.1",
     "zod": "^4.1.12"
   },
