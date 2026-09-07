@@ -36,13 +36,15 @@ export function looksLikeOtpChallenge(text: string | undefined): boolean {
 /**
  * Map a library `errorType`/`errorMessage` (plus, optionally, the last page URL
  * appended to the message by the runner) to the bridge's fixed error vocabulary.
- * Never returns the raw message.
+ * A visible OTP form observed before browser cleanup can supply additional evidence.
+ * Never returns the raw message or overrides an explicit credential failure.
  */
-export function mapScraperError(errorType?: string, errorMessage?: string): MappedScrapeError {
-	if (looksLikeOtpChallenge(errorMessage)) {
+export function mapScraperError(errorType?: string, errorMessage?: string, observedOtpForm = false): MappedScrapeError {
+	const type: ScrapeErrorType = errorType && KNOWN_TYPES.has(errorType) ? errorType as ScrapeErrorType : 'GENERIC';
+	const canInferOtp = ['GENERIC', 'GENERAL_ERROR', 'TIMEOUT'].includes(type);
+	if (canInferOtp && (observedOtpForm || looksLikeOtpChallenge(errorMessage))) {
 		return {errorType: 'OTP_REQUIRED', message: SCRAPE_ERROR_MESSAGES.OTP_REQUIRED};
 	}
 
-	const type: ScrapeErrorType = errorType && KNOWN_TYPES.has(errorType) ? errorType as ScrapeErrorType : 'GENERIC';
 	return {errorType: type, message: SCRAPE_ERROR_MESSAGES[type]};
 }

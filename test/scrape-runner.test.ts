@@ -151,6 +151,67 @@ describe('runCompany', () => {
 		expect(outcome).toEqual({ok: false, errorType: 'TIMEOUT', message: 'Scrape exceeded its time limit'});
 	});
 
+	it.each(['GENERIC', 'GENERAL_ERROR', 'TIMEOUT'])('recognizes a visible same-page OTP form after browser cleanup for %s', async errorType => {
+		scraperMock.behaviour = {
+			result: {success: false, errorType, errorMessage: 'Login did not finish'},
+			pageUrl: 'https://login.bankhapoalim.co.il/ng-portals/auth/he/',
+			otpFormVisible: true,
+		};
+
+		const outcome = await runCompany(context(env), createCapturingLogger());
+
+		expect(outcome).toMatchObject({ok: false, errorType: 'OTP_REQUIRED'});
+		expect(scraperMock.browsers[0]!.connected).toBe(false);
+		const page = scraperMock.pages[0]!;
+		expect(page.waitForSelector).toHaveBeenCalledWith('form.auth-otp-login', expect.objectContaining({visible: true, timeout: 0}));
+		expect(page.otpHandle.dispose).toHaveBeenCalledOnce();
+	});
+
+	it.each(['INVALID_PASSWORD', 'CHANGE_PASSWORD', 'ACCOUNT_BLOCKED'])('preserves explicit %s despite an observed OTP form', async errorType => {
+		scraperMock.behaviour = {result: {success: false, errorType, errorMessage: 'OTP login rejected'}, otpFormVisible: true};
+
+		const outcome = await runCompany(context(env), createCapturingLogger());
+
+		expect(outcome).toMatchObject({ok: false, errorType});
+	});
+
+	it('preserves a successful scrape after an observed OTP form', async () => {
+		scraperMock.behaviour = {result: {success: true, accounts: []}, otpFormVisible: true};
+
+		const outcome = await runCompany(context(env), createCapturingLogger());
+
+		expect(outcome.ok).toBe(true);
+	});
+
+	it('does not watch another company for the Hapoalim form', async () => {
+		scraperMock.behaviour = {result: {success: false, errorType: 'TIMEOUT'}, otpFormVisible: true};
+
+		const outcome = await runCompany(context(env, {company: 'visaCal'}), createCapturingLogger());
+
+		expect(outcome).toMatchObject({ok: false, errorType: 'TIMEOUT'});
+		expect(scraperMock.pages[0]!.waitForSelector).not.toHaveBeenCalled();
+	});
+
+	it('cancels the watcher and tolerates page closure when no visible form appears', async () => {
+		scraperMock.behaviour = {result: {success: false, errorType: 'GENERIC'}, otpFormVisible: false};
+
+		const outcome = await runCompany(context(env), createCapturingLogger());
+
+		expect(outcome).toMatchObject({ok: false, errorType: 'GENERIC'});
+		const page = scraperMock.pages[0]!;
+		expect(page.waitForSelector.mock.calls[0]![1].signal.aborted).toBe(true);
+		expect(page.otpHandle.dispose).not.toHaveBeenCalled();
+	});
+
+	it('reports an observed OTP challenge when the overall scrape deadline expires', async () => {
+		scraperMock.behaviour = {hang: true, otpFormVisible: true};
+
+		const outcome = await runCompany(context(env, {config: companyConfig({timeoutMinutes: 0.001})}), createCapturingLogger());
+
+		expect(outcome).toMatchObject({ok: false, errorType: 'OTP_REQUIRED'});
+		expect(scraperMock.browsers[0]!.connected).toBe(false);
+	});
+
 	it('reports BRIDGE_ERROR when the library throws', async () => {
 		scraperMock.behaviour = {throwError: new Error('boom')};
 		const outcome = await runCompany(context(env), createCapturingLogger());

@@ -44,8 +44,8 @@ port. No extra network or public route was added.
 - The ledger contained zero runs, source states, accounts, transactions and consumers. No bank login or import ran.
 - The container had no published ports or public router. Key compiled modules matched the locally verified build.
 
-The container remains **paused pending current credentials**, and Securo has no bridge connection yet. Its
-freshness healthcheck intentionally remains unsuccessful in this state. Before activation, resolve the actual
+At the end of the initial deployment, the container was **paused pending current credentials**, and Securo had
+no bridge connection. Its freshness healthcheck intentionally remained unsuccessful. Before activation, resolve the actual
 1Password item references, stop the serving container while performing a manual initial scrape, and enable one
 provider at a time. Do not claim successful bank synchronization until real results have been checked and the
 Securo connection has been created.
@@ -53,6 +53,37 @@ Securo connection has been created.
 The image currently inherits Puppeteer OCI labels; those labels identify its base, not the bridge revision.
 Use the release/run, resolved digest and compiled-source comparison for this deployment's provenance. Outline
 was excluded from service startup and unavailable during this run, so these project notes are the durable record.
+
+### Credential activation and browser repair, 2026-09-07
+
+The current Hapoalim and CAL credentials became available through the Home Server vault. Initial login
+verification exposed two separate problems: Hapoalim's ordinary login URL was incorrectly treated as an OTP
+challenge, and the container bundled Chrome 152 while the installed Puppeteer driver expected Chrome 148.
+[PR #11](https://github.com/tomerh2001/israeli-banks-simplefin-bridge/pull/11) corrected the error classification;
+[PR #12](https://github.com/tomerh2001/israeli-banks-simplefin-bridge/pull/12) aligned the browser and driver and
+added a build check that rejects mismatched versions. Release `1.0.2` was deployed through the moving `latest` tag.
+
+The deployed browser reported Chrome `148.0.7778.97` with Puppeteer `24.43.1`. Local page rendering passed and
+the container's home directory was writable. CAL's assisted login then reached `LOGIN_SUCCESS` in about ten
+seconds; the earlier Chrome 152 run had lost its page before login. The following normal headless CAL scrape
+succeeded with 14 returned card accounts and 1,678 transactions, with no anomalies or synthetic transactions.
+These counts describe the bridge ledger; Securo synchronization still requires its own result check.
+
+Hapoalim then reached a real SMS challenge on the matching browser: the bank's authentication request returned
+200 and the page displayed `form.auth-otp-login` with five code inputs on the unchanged ordinary login URL.
+The user completed SMS verification in the assisted browser. A following scrape with a headed browser
+succeeded with one checking account and 150 posted transactions spanning May 5 through September 7, with no
+anomalies. The corresponding headless run had stalled before login, so Hapoalim now uses
+`scraperOptions.showBrowser: true`. CAL continues to use a headless browser.
+
+The bridge ledger is seeded with 15 accounts and 1,828 transactions. These results precede creation of the
+Securo connection; they do not yet verify imports into the destination or the unattended schedule. The next
+image adds the visible-form OTP watcher, a virtual display for headed scheduled runs, and visible account-name
+warnings when a source reports no balance. Complete destination verification after deploying that image.
+
+In release `1.0.2`, the runner recognized OTP from explicit message or URL markers, so the same-page form
+surfaced as a generic login failure. The new watcher observes the known visible form before browser cleanup
+and retains only that boolean classification. The ordinary auth URL alone remains insufficient evidence.
 
 ## 1. Network: put the bridge where Securo can see it
 

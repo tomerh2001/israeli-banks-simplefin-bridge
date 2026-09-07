@@ -149,6 +149,45 @@ describe('formatting and dates', () => {
 });
 
 describe('sign and currency conventions', () => {
+	it('labels an unavailable balance until a later scrape reports it without changing account or transaction identity', () => {
+		const ledger = healthyLedger();
+		const account = seedCardAccount(ledger, {name: '  Visa Cal ····1234  ', balance: undefined});
+		seedTransaction(ledger, {accountId: account.id});
+		const unavailable = build(ledger, lastYear);
+		expect(unavailable.accounts[0]).toMatchObject({id: account.id, name: 'Visa Cal ····1234 (balance unavailable)', balance: '0.00'});
+		expect(unavailable.errlist).toEqual([{code: 'act.balance_unavailable', msg: ERROR_MESSAGES.balanceUnavailable, account_id: account.id}]);
+		expect(build(ledger, lastYear).accounts[0]?.name).toBe(unavailable.accounts[0]?.name);
+		expect(ledger.getAccount(account.id)?.name).toBe(account.name);
+
+		ledger.upsertAccount({...account, balance: -42.5, lastSeen: NOW.toISOString()});
+		const reported = build(ledger, lastYear);
+		expect(reported.accounts[0]).toMatchObject({id: account.id, name: 'Visa Cal ····1234', balance: '-42.50'});
+		expect(reported.accounts[0]?.transactions).toEqual(unavailable.accounts[0]?.transactions);
+		expect(reported.errlist).toEqual([]);
+	});
+
+	it('does not label a reported zero balance as unavailable', () => {
+		const ledger = healthyLedger();
+		const account = seedCardAccount(ledger, {balance: 0});
+		const response = build(ledger, noWindow);
+		expect(response.accounts[0]).toMatchObject({id: account.id, name: account.name, balance: '0.00'});
+		expect(response.errlist).toEqual([]);
+	});
+
+	it('keeps the complete unavailable warning within the 255-character account name limit', () => {
+		const ledger = healthyLedger();
+		const account = seedCardAccount(ledger, {name: `  ${'א'.repeat(300)}  `, balance: undefined});
+		const unavailable = build(ledger, noWindow).accounts[0]!;
+		expect(unavailable.id).toBe(account.id);
+		expect(unavailable.name).toHaveLength(255);
+		expect(unavailable.name).toMatch(/^א+ \(balance unavailable\)$/);
+
+		ledger.upsertAccount({...account, balance: 0});
+		const reported = build(ledger, noWindow).accounts[0]!;
+		expect(reported.id).toBe(account.id);
+		expect(reported.name).toBe('א'.repeat(255));
+	});
+
 	it('passes balances through: checking real balance, card negative debt, null -> 0.00 + errlist', () => {
 		const ledger = healthyLedger();
 		seedAccount(ledger, {balance: 100.1});

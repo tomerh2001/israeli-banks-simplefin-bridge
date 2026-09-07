@@ -250,6 +250,10 @@ function transactionsFor(account: LedgerAccount, currency: string, companyConfig
 
 function toSimpleFinAccount(account: LedgerAccount, companyConfig: CompanyConfig, context: AccountContext): SimpleFinAccount {
 	const currency = normalizeCurrency(account.currency, context.config.currency);
+	// Securo logs errlist warnings but otherwise displays an unknown balance as 0.
+	// Derive the warning from current source data so its next sync clears it when a balance is reported.
+	const nameSuffix = account.balance === undefined ? ' (balance unavailable)' : '';
+	const name = truncate(account.name.trim() || account.id, maxNameLength - nameSuffix.length);
 	if (account.balance === undefined) {
 		context.errlist.push({code: 'act.balance_unavailable', msg: ERROR_MESSAGES.balanceUnavailable, account_id: account.id});
 		context.logger.debug('balance unavailable', {account: account.id});
@@ -257,7 +261,7 @@ function toSimpleFinAccount(account: LedgerAccount, companyConfig: CompanyConfig
 
 	return compact({
 		id: account.id,
-		name: truncate(account.name, maxNameLength) || account.id,
+		name: `${name}${nameSuffix}`,
 		conn_id: account.company,
 		org: orgObjectFor(account.company, companyConfig, context.config),
 		currency,

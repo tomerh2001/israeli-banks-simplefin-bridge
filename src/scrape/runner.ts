@@ -103,6 +103,21 @@ function trackMainFrameUrl(page: Page, onUrl: (url: string) => void): void {
 	});
 }
 
+/** Hapoalim displays its OTP form without changing URL; retain only whether it became visible. */
+function trackHapoalimOtpForm(page: Page, signal: AbortSignal, onVisible: () => void): void {
+	// Puppeteer's selector waiter survives navigation. Starting it here must not block login.
+	void page.waitForSelector('form.auth-otp-login', {visible: true, timeout: 0, signal}).then(async element => {
+		if (!element) {
+			return;
+		}
+
+		onVisible();
+		await element.dispose();
+	}).catch(() => {
+		// Page closure or cancellation is normal when login finishes without an OTP form.
+	});
+}
+
 /** Close the browser gracefully; SIGKILL the Chrome process if it lingers. */
 async function killBrowser(browser: Browser | undefined, logger: Logger): Promise<void> {
 	if (!browser) {
@@ -144,6 +159,8 @@ export async function runCompany(ctx: SourceRunContext, logger: Logger): Promise
 	const startedAt = new Date();
 	let browser: Browser | undefined;
 	let lastUrl: string | undefined;
+	let observedOtpForm = false;
+	const otpWatcher = new AbortController();
 
 	clearStaleLocks(ctx.profileDir);
 	const pruned = pruneScreenshots(ctx.env.screenshotsDir, startedAt, log);
@@ -161,6 +178,11 @@ export async function runCompany(ctx: SourceRunContext, logger: Logger): Promise
 			trackMainFrameUrl(page, url => {
 				lastUrl = url;
 			});
+			if (ctx.company === 'hapoalim') {
+				trackHapoalimOtpForm(page, otpWatcher.signal, () => {
+					observedOtpForm = true;
+				});
+			}
 		},
 	});
 
@@ -177,14 +199,15 @@ export async function runCompany(ctx: SourceRunContext, logger: Logger): Promise
 		if (outcome.expired) {
 			log.warn('scrape timed out; killing browser', {timeoutMinutes: ctx.config.timeoutMinutes});
 			await killBrowser(browser, log);
-			return {ok: false, errorType: 'TIMEOUT', message: SCRAPE_ERROR_MESSAGES.TIMEOUT};
+			return {ok: false, ...mapScraperError('TIMEOUT', undefined, observedOtpForm)};
 		}
 
-		return finishRun(ctx, outcome.value, lastUrl, log);
+		return finishRun(ctx, outcome.value, lastUrl, observedOtpForm, log);
 	} catch (error) {
 		log.error('scrape threw', {error: (error as Error).message});
 		return {ok: false, errorType: 'BRIDGE_ERROR', message: SCRAPE_ERROR_MESSAGES.BRIDGE_ERROR};
 	} finally {
+		otpWatcher.abort();
 		if (existsSync(screenshot)) {
 			chmodSync(screenshot, 0o600);
 		}
@@ -196,9 +219,9 @@ export async function runCompany(ctx: SourceRunContext, logger: Logger): Promise
 }
 
 /** Map a finished library result to the run outcome. */
-function finishRun(ctx: SourceRunContext, result: ScraperScrapingResult, lastUrl: string | undefined, log: Logger): SourceRunOutcome {
+function finishRun(ctx: SourceRunContext, result: ScraperScrapingResult, lastUrl: string | undefined, observedOtpForm: boolean, log: Logger): SourceRunOutcome {
 	if (!result.success) {
-		const mapped = mapScraperError(result.errorType, [result.errorMessage, lastUrl].filter(Boolean).join(' '));
+		const mapped = mapScraperError(result.errorType, [result.errorMessage, lastUrl].filter(Boolean).join(' '), observedOtpForm);
 		log.warn('scrape failed', {errorType: mapped.errorType, message: mapped.message});
 		log.debug('scrape failure detail', {libraryErrorType: result.errorType, libraryMessage: result.errorMessage, lastUrl});
 		return {ok: false, errorType: mapped.errorType, message: mapped.message};
