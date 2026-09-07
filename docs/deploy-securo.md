@@ -26,9 +26,33 @@ company per day. Hapoalim is restricted to the legacy checking-account selector,
 account for this first phase. CAL uses charge dates; pending transactions and synthetic payments are disabled.
 
 The staged Compose mounts configuration at `/app/config.json`, persistent data at `/app/data`, and the Connect
-token read-only. It uses `traefik_proxy` with `traefik.enable=false`. The published image rollout and live banking
-verification were still pending when this note was written. A running bridge with both companies disabled is a
-paused deployment; a healthy process alone does not mean bank importing is active.
+token read-only. It uses `traefik_proxy` with `traefik.enable=false`. The Connect API is reachable from this
+network at its existing host-gateway binding, `http://172.16.1.1:8088`; the LAN address has no listener on that
+port. No extra network or public route was added.
+
+### Deployment verification, 2026-09-07
+
+[Release v1.0.0](https://github.com/tomerh2001/israeli-banks-simplefin-bridge/releases/tag/v1.0.0) was built by
+[CI](https://github.com/tomerh2001/israeli-banks-simplefin-bridge/actions/runs/34156997467) from merged source
+`be0c0827def2eed3360586b2fdfcd01c8e8dc46c` and deployed using the moving `latest` tag. Resolved image digest:
+`sha256:c7e910eb34d5b31304d1419e0f2791764afc0bda725338cb6ac8d99d02ddb9c8`.
+
+- All 190 offline tests, lint, typecheck, schema consistency and production build passed.
+- Both `securo-backend` and `securo-worker` read `/simplefin/info` successfully (HTTP 200).
+- Unauthenticated `/simplefin/accounts` returned 403; `/healthz` returned 503 with both companies disabled.
+- The bridge resolved its read-only, mode-0600 Connect token and received HTTP 200 from `/v1/vaults`.
+- The ledger contained zero runs, source states, accounts, transactions and consumers. No bank login or import ran.
+- The container had no published ports or public router. Key compiled modules matched the locally verified build.
+
+The container remains **paused pending current credentials**, and Securo has no bridge connection yet. Its
+freshness healthcheck intentionally remains unsuccessful in this state. Before activation, resolve the actual
+1Password item references, stop the serving container while performing a manual initial scrape, and enable one
+provider at a time. Do not claim successful bank synchronization until real results have been checked and the
+Securo connection has been created.
+
+The image currently inherits Puppeteer OCI labels; those labels identify its base, not the bridge revision.
+Use the release/run, resolved digest and compiled-source comparison for this deployment's provenance. Outline
+was excluded from service startup and unavailable during this run, so these project notes are the durable record.
 
 ## 1. Network: put the bridge where Securo can see it
 
