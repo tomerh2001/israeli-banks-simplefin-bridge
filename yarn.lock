@@ -4838,15 +4838,15 @@ __metadata:
   languageName: node
   linkType: hard
 
-"israeli-bank-scrapers@npm:6.9.0":
-  version: 6.9.0
-  resolution: "israeli-bank-scrapers@npm:6.9.0"
+"israeli-bank-scrapers@npm:6.11.0":
+  version: 6.11.0
+  resolution: "israeli-bank-scrapers@npm:6.11.0"
   dependencies:
     debug: "npm:^4.3.2"
     moment: "npm:^2.22.2"
     moment-timezone: "npm:^0.5.37"
     puppeteer: "npm:^24.40.0"
-  checksum: 10c0/410c9f92d6715f23b4c4bff972a71e98264ddf474f20ca0b05839dcac2f384477a1980a31a98e67f6f272869f9f7d4ec7f3085636a483fafc78fe125842d2749
+  checksum: 10c0/83b62ec9237c409f93ce79bc977cc8837963c9639ae4431a52e1a7b261c7de43ec0fdc1c50286b81196ef6272af060a45f3dbe3c8d94d5569cc7f33cf07bedc3
   languageName: node
   linkType: hard
 
@@ -4862,7 +4862,7 @@ __metadata:
     "@types/node": "npm:^24.9.1"
     cronstrue: "npm:^3.9.0"
     hono: "npm:^4.10.7"
-    israeli-bank-scrapers: "npm:6.9.0"
+    israeli-bank-scrapers: "npm:6.11.0"
     moment-timezone: "npm:^0.5.48"
     node-cron: "npm:^4.2.1"
     semantic-release: "npm:^25.0.2"
