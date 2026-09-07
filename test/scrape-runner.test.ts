@@ -140,6 +140,17 @@ describe('runCompany', () => {
 		expect(outcome).toMatchObject({ok: false, errorType: 'OTP_REQUIRED'});
 	});
 
+	it('preserves a login timeout on the ordinary Hapoalim auth page', async () => {
+		scraperMock.behaviour = {
+			result: {success: false, errorType: 'TIMEOUT', errorMessage: 'Timed out waiting for the login form'},
+			pageUrl: 'https://login.bankhapoalim.co.il/ng-portals/auth/he/',
+		};
+
+		const outcome = await runCompany(context(env), createCapturingLogger());
+
+		expect(outcome).toEqual({ok: false, errorType: 'TIMEOUT', message: 'Scrape exceeded its time limit'});
+	});
+
 	it('reports BRIDGE_ERROR when the library throws', async () => {
 		scraperMock.behaviour = {throwError: new Error('boom')};
 		const outcome = await runCompany(context(env), createCapturingLogger());
@@ -207,11 +218,16 @@ describe('mapScraperError', () => {
 	});
 
 	it('detects OTP challenges from message or URL text', () => {
-		expect(mapScraperError('GENERIC', 'waiting for url https://x/ng-portals/auth/he')).toMatchObject({errorType: 'OTP_REQUIRED'});
+		expect(mapScraperError('GENERIC', 'waiting for url https://x/ng-portals/auth/he/otp')).toMatchObject({errorType: 'OTP_REQUIRED'});
 		expect(mapScraperError('TIMEOUT', 'Enter the OTP code')).toMatchObject({errorType: 'OTP_REQUIRED'});
 		expect(mapScraperError('GENERIC', 'we sent an SMS')).toMatchObject({errorType: 'OTP_REQUIRED'});
 		expect(mapScraperError('GENERIC', 'transmission error')).toMatchObject({errorType: 'GENERIC'});
 		expect(mapScraperError('GENERIC', 'bank said: OTP required').message).not.toContain('bank said');
+	});
+
+	it.each(['GENERIC', 'TIMEOUT', 'INVALID_PASSWORD', 'CHANGE_PASSWORD', 'ACCOUNT_BLOCKED'])('preserves %s when the only URL evidence is the ordinary auth page', errorType => {
+		expect(mapScraperError(errorType, 'waiting for url https://login.bankhapoalim.co.il/ng-portals/auth/he/'))
+			.toMatchObject({errorType});
 	});
 });
 

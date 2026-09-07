@@ -25,8 +25,8 @@ export const SCRAPE_ERROR_MESSAGES: Record<ScrapeErrorType, string> = {
 
 const KNOWN_TYPES = new Set<string>(Object.keys(SCRAPE_ERROR_MESSAGES));
 
-/** Heuristic: the library never reports OTP explicitly; it shows in the message or in the page URL. */
-const OTP_PATTERN = /\botp\b|\bsms\b|ng-portals\/auth/i;
+/** Require an explicit code-challenge marker; Hapoalim's /ng-portals/auth is also its normal login page. */
+const OTP_PATTERN = /\botp\b|\bsms\b/i;
 
 /** True when the (message + URL) text looks like a one-time-code challenge. */
 export function looksLikeOtpChallenge(text: string | undefined): boolean {
