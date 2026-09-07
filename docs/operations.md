@@ -86,6 +86,11 @@ docker compose up -d israeli-banks-bridge
 The helper runs on its own network with the port bound to loopback only; it never shares a network with the
 consumers and is not reachable from the LAN.
 
+On this host, Hapoalim still required `scraperOptions.showBrowser: true` after SMS enrolment: a headed scrape
+succeeded while a headless run stalled before login. The container entrypoint supplies an Xvfb display for
+`bridge serve` and `bridge scrape`, so that setting also works during scheduled collection. CAL can remain
+headless. Assisted login starts its own display and noVNC stack; the scheduled display exposes no remote UI.
+
 ## Chrome and Puppeteer versions
 
 The Docker base is pinned to Puppeteer `24.43.1`, matching the driver resolved in `yarn.lock` and its supported
@@ -117,6 +122,15 @@ Paste the new token into the consumer (Securo: connection page -> reconnect; Act
 then link again). To cut a consumer off for good: `bridge revoke --label <name>`; it gets `403` from then on.
 
 Un-claimed tokens expire after `server.claimTtlMinutes`; nothing to clean up.
+
+## Accounts without a reported balance
+
+When a source returns no balance, the account name includes `(balance unavailable)` and the SimpleFIN response
+contains `act.balance_unavailable`. Securo still stores the required numeric `0.00` placeholder and reconciles
+the opening balance to zero; do not treat that placeholder as the source's reported balance. The name warning
+reflects the latest scrape and clears on the next sync when a balance is reported, including a real zero.
+An account with no balance can still have valid transaction history; missing balance alone establishes neither
+that the card is closed nor that it is inactive. A user-defined display name in Securo can hide the name warning.
 
 ## Backups
 

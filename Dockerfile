@@ -31,7 +31,7 @@ USER root
 # Assisted login (bridge login <company>) runs Chrome headed under Xvfb and
 # exposes it through noVNC; the packages are small enough to keep in the base.
 RUN apt-get update \
-	&& apt-get install -y --no-install-recommends xvfb x11vnc novnc websockify \
+	&& apt-get install -y --no-install-recommends xvfb xauth tini x11vnc novnc websockify \
 	&& apt-get clean \
 	&& rm -rf /var/lib/apt/lists/*
 
@@ -95,6 +95,7 @@ NODE
 
 COPY --from=build --chown=pptruser:pptruser /app/dist dist
 COPY --chown=pptruser:pptruser config.example.json ./
+COPY --chmod=0755 scripts/container-entrypoint.sh /usr/local/bin/bridge-entrypoint
 
 ENV DATA_DIR=/app/data \
 	CONFIG_PATH=/app/config.json \
@@ -108,4 +109,5 @@ HEALTHCHECK --interval=5m --timeout=20s --start-period=60s --retries=3 \
 	CMD ["bridge", "health"]
 
 USER pptruser
+ENTRYPOINT ["/usr/bin/tini", "-g", "--", "/usr/local/bin/bridge-entrypoint"]
 CMD ["bridge", "serve"]
