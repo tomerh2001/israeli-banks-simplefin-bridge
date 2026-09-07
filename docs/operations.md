@@ -2,7 +2,9 @@
 
 All commands assume the generic [`compose.yml`](../compose.yml) and are run from the stack directory.
 `bridge` inside the container is a wrapper for `node /app/dist/cli.js`; the command table is in
-[architecture.md](./architecture.md#cli-bridge).
+[architecture.md](./architecture.md#cli-bridge). The alias below is for status/token commands on a running server.
+For manual scraping, assisted login or profile changes, stop the serving container and use a one-off container
+with the same data mounts. The scheduler's overlap guard only covers its own process.
 
 ```sh
 alias bridge='docker compose exec israeli-banks-bridge bridge'
@@ -11,18 +13,20 @@ alias bridge='docker compose exec israeli-banks-bridge bridge'
 ## First run
 
 1. `cp config.example.json config.json` and edit: one entry per company with `op://` references, `kind`, and for
-   cards `chargeDay`. Validate against `config.schema.json` (most editors do it from the `$schema` key).
+   cards the intended date mode (do not guess `chargeDay`). Validate against `config.schema.json` (most editors do it from the `$schema` key).
 2. Create a read-only 1Password Connect token with access to the vault holding the bank items and save it to
    `secrets/op-connect-token` (mode 0600). Set `OP_CONNECT_HOST` in `compose.yml`.
-3. `mkdir -p data && chown 10042:999 data` (uid/gid of `pptruser` in the image). The ledger and Chrome profiles
-   live here.
+3. Create `data/` with ownership matching the configured runtime uid/gid. The audited TrueNAS stack uses
+   `10042:3027`; use its filesystem ACL API for dataset ownership, not a copied generic `chown` command.
+   The ledger and Chrome profiles live here.
 4. Attach the consumer's network in `compose.yml` (see [deploy-securo.md](./deploy-securo.md)).
-5. `docker compose up -d`, then `docker compose logs -f israeli-banks-bridge`. The server starts immediately;
-   the first scrape runs at the next cron slot. Run one now: `bridge scrape`.
-6. For companies that ask for an SMS code on a new device (Hapoalim), the first scrape fails with
-   `OTP_REQUIRED`/`TWO_FACTOR_RETRIEVER_MISSING`. Do the [OTP enrolment](#otp-enrolment-and-re-enrolment) once,
-   then `bridge scrape <company>`.
-7. `bridge status` should show every enabled company with a recent `lastSuccessAt`, and `curl
+5. After current credentials are resolved and a company is enabled, keep the serving container stopped and run
+   `docker compose run --rm --no-deps israeli-banks-bridge bridge scrape <company>`. Start with one company.
+6. If a company asks for an SMS code, follow [OTP enrolment](#otp-enrolment-and-re-enrolment). Successful
+   assistance performs its confirmation scrape while the serving container remains stopped. Do not retry an
+   abandoned or failed login automatically.
+7. After initial results are verified, run `docker compose up -d israeli-banks-bridge`. `bridge status` should
+   show every enabled company with a recent `lastSuccessAt`, and `curl
    http://israeli-banks-bridge:8080/healthz` (from any container on the network) should return 200.
 8. Mint a token per consumer and connect them.
 
@@ -36,8 +40,10 @@ companies are unhealthy regardless of `staleHours`), and no further login attemp
 1. Change the password on the bank's site.
 2. Update the field in 1Password. Nothing else: the bridge fingerprints the resolved credential tuple, and a changed
    fingerprint auto-unparks the company on the next scheduled run.
-3. To resume immediately: `bridge scrape <company>`. If you changed nothing in 1Password (false alarm), use
-   `bridge unpark <company>` first, or `bridge scrape <company> --force`.
+3. To resume immediately, stop the serving container, run
+   `docker compose run --rm --no-deps israeli-banks-bridge bridge scrape <company>`, then restart the server.
+   If credentials did not change, establish that the reported problem is resolved before deliberately unparking
+   or forcing a login. A force option still respects the daily attempt cap.
 
 `INVALID_PASSWORD` and `ACCOUNT_BLOCKED` park the same way. `ACCOUNT_BLOCKED` means the bank locked the login; unlock
 it with the bank first, then unpark.
@@ -55,12 +61,12 @@ COMPANY=hapoalim docker compose --profile bootstrap run --rm israeli-banks-bridg
 The helper prints the noVNC URL (`http://127.0.0.1:6080/vnc.html`) and password (`NOVNC_PASSWORD` or a random one).
 Open it from the host (SSH port-forward `-L 6080:127.0.0.1:6080` from elsewhere), watch the automated login, type
 the SMS code when the bank asks, and wait until the post-login page shows up; the helper detects it and closes Chrome
-gracefully so the trust cookie is persisted. Press Enter in the terminal to close it by hand if detection does not
-trigger. Then:
+gracefully so the trust cookie is persisted. Press Enter only after verifying the login completed if detection
+fails. The helper then performs its confirmation scrape. A timeout or closed browser does not unpark or retry.
+Once confirmation succeeds, restart the serving container:
 
 ```sh
 docker compose up -d israeli-banks-bridge
-bridge scrape hapoalim
 ```
 
 The helper runs on its own network with the port bound to loopback only; it never shares a network with the
@@ -68,14 +74,14 @@ consumers and is not reachable from the LAN.
 
 ## Rotating a consumer token
 
-Consumers keep the Access URL; the setup token is single-use. To rotate the secret a consumer authenticates with:
+Consumers keep the Access URL; the setup token has a limited claim count and TTL. To rotate the secret a consumer authenticates with:
 
 ```sh
 bridge mint-token --label securo --rotate     # new secret + new claim id; old secret stops working immediately
 ```
 
 Paste the new token into the consumer (Securo: connection page -> reconnect; Actual: reset SimpleFIN credentials,
-then link again). To cut a consumer off for good: `bridge revoke --label <name>`; it gets `401` from then on.
+then link again). To cut a consumer off for good: `bridge revoke --label <name>`; it gets `403` from then on.
 
 Un-claimed tokens expire after `server.claimTtlMinutes`; nothing to clean up.
 
@@ -90,7 +96,7 @@ State is entirely under `data/`:
 | `data/screenshots/` | failure screenshots | no |
 | `config.json`, `secrets/` | config and Connect token | keep with the stack, outside the image |
 
-Restoring: stop, replace `data/`, fix ownership (`chown -R 10042:999 data`), start. A restored ledger with an older
+Restoring: stop, replace `data/`, restore the configured runtime ownership/ACLs, then start. A restored ledger with an older
 `meta.id_scheme_version` than the running image is refused at startup; that is deliberate, see
 [architecture.md](./architecture.md#id-scheme-id_scheme_version--1).
 
@@ -113,7 +119,7 @@ docker compose pull && docker compose up -d
 | Symptom | Where to look | Fix |
 |---|---|---|
 | `bridge status` shows **parked** | `parkedReason` | See [rotating a bank password](#rotating-a-bank-password). `bridge unpark <company>` after fixing the cause. |
-| `/healthz` is **503**, company **stale** | `lastErrorType`, `docker compose logs` | `TIMEOUT`/`GENERIC` back off 1 h, then 3 h, then the next slot. Run `bridge scrape <company>` to retry now; check `data/screenshots/` for what the page looked like. Raise `timeoutMinutes` for slow sites. |
+| `/healthz` is **503**, company **stale** | `lastErrorType`, `docker compose logs` | `TIMEOUT`/`GENERIC` back off 1 h, then 3 h, then the next slot. If a retry is appropriate, stop the server and run a one-off scrape before restarting; check `data/screenshots/` for what the page looked like. Raise `timeoutMinutes` for slow sites. |
 | Consumer shows **401/403** / reconnect banner | `bridge status` consumers section | The consumer was revoked or rotated, or the Securo `SECRET_KEY` changed. Mint a new token and reconnect. `403` on the claim itself means the token was already used up (`maxClaims`) or expired: mint a new one. |
 | Scrape fails immediately with a Chrome launch error | logs mention `SingletonLock` / `profile in use` | Another Chrome holds the profile (login helper still running, or a previous run was killed). Stop it; the bridge removes stale `Singleton*` files before launch, but not while a live process owns them. Last resort: `bridge reset-profile <company>` (re-enrol OTP afterwards). |
 | Chrome crashes / `Target closed` mid-scrape | container logs | `shm_size` too small (keep 1g) or missing `SYS_ADMIN`. |
