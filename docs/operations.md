@@ -80,6 +80,23 @@ docker compose up -d israeli-banks-bridge
 The helper runs on its own network with the port bound to loopback only; it never shares a network with the
 consumers and is not reachable from the LAN.
 
+## Chrome and Puppeteer versions
+
+The Docker base is pinned to Puppeteer `24.43.1`, matching the driver resolved in `yarn.lock` and its supported
+Chrome `148.0.7778.97`. Update the base and dependency lock together. The image build checks the actual Chrome
+binary against the installed driver's `PUPPETEER_REVISIONS.chrome` and fails if they differ; the bridge's
+published deployment image still uses its moving `latest` tag.
+
+On 2026-09-07, the former `puppeteer:latest` base supplied Chrome `152.0.7977.75` while the application still
+loaded Puppeteer `24.43.1`. That mismatch was found during CAL page-closure and Hapoalim login investigations.
+Matching the versions removes this compatibility variable; it does not establish that either bank login works.
+[Puppeteer's supported-browser list](https://pptr.dev/supported-browsers) maps the tested browser pairs.
+
+Upgrading only `israeli-bank-scrapers` from `6.9.0` to `6.11.0` does not change its Hapoalim, CAL, or browser-base
+implementation, and both releases depend on Puppeteer 24. Puppeteer 25 requires separate compatibility checks:
+its [major release](https://github.com/puppeteer/puppeteer/releases/tag/puppeteer-v25.0.0) changes the package to
+ESM and makes `executablePath()` and `defaultArgs()` asynchronous.
+
 ## Rotating a consumer token
 
 Consumers keep the Access URL; the setup token has a limited claim count and TTL. To rotate the secret a consumer authenticates with:
