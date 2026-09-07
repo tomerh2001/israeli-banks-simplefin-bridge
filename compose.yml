@@ -1,0 +1,75 @@
+# Generic deployment of israeli-banks-simplefin-bridge.
+#
+# - `israeli-banks-bridge` is the long-running scraper + SimpleFIN server.
+#   It publishes NO ports: consumers (Securo, Actual) reach it by container
+#   name on a shared Docker network. See README "Connecting Securo".
+# - `israeli-banks-bridge-login` is an on-demand helper for banks that demand
+#   an SMS one-time code (assisted login). It lives behind the `bootstrap`
+#   profile, on its own network, and publishes noVNC on localhost only:
+#
+#     COMPANY=hapoalim docker compose --profile bootstrap run --rm israeli-banks-bridge-login
+#
+# Copy config.example.json to config.json, put the read-only 1Password Connect
+# token in secrets/op-connect-token and create the data/ directory (ledger +
+# Chrome profiles) before the first `docker compose up -d`.
+
+services:
+  israeli-banks-bridge:
+    image: ghcr.io/tomerh2001/israeli-banks-simplefin-bridge:latest
+    container_name: israeli-banks-bridge
+    restart: unless-stopped
+    # Chrome sandbox needs SYS_ADMIN (or run Chrome with --no-sandbox, which is worse).
+    cap_add:
+      - SYS_ADMIN
+    security_opt:
+      - no-new-privileges:true
+    # Chrome renders into /dev/shm; the 64 MB Docker default crashes tabs.
+    shm_size: 1g
+    environment:
+      TZ: Asia/Jerusalem
+      # Cron override for config.schedule (optional).
+      # SCHEDULE: "0 6,18 * * *"
+      OP_CONNECT_HOST: http://op-connect:8080
+      OP_CONNECT_TOKEN_FILE: /run/secrets/op_connect_token
+      # OP_DISABLED: "1"   # smoke tests only: treat config values as literals
+    volumes:
+      - ./config.json:/app/config.json:ro
+      - ./data:/app/data
+      - ./secrets/op-connect-token:/run/secrets/op_connect_token:ro
+    # No `ports:` on purpose. Attach the consumer's network instead, e.g.
+    #   networks: [default, traefik_proxy]
+    # and declare `traefik_proxy` as external below.
+
+  # Assisted login: `bridge login <company>` with a visible Chrome behind noVNC.
+  israeli-banks-bridge-login:
+    image: ghcr.io/tomerh2001/israeli-banks-simplefin-bridge:latest
+    profiles: [bootstrap]
+    command: ["bridge", "login", "${COMPANY:-hapoalim}"]
+    stdin_open: true
+    tty: true
+    cap_add:
+      - SYS_ADMIN
+    security_opt:
+      - no-new-privileges:true
+    shm_size: 1g
+    environment:
+      TZ: Asia/Jerusalem
+      OP_CONNECT_HOST: http://op-connect:8080
+      OP_CONNECT_TOKEN_FILE: /run/secrets/op_connect_token
+      # NOVNC_PASSWORD: change-me   # otherwise a random one is printed
+    volumes:
+      - ./config.json:/app/config.json:ro
+      - ./data:/app/data
+      - ./secrets/op-connect-token:/run/secrets/op_connect_token:ro
+    ports:
+      - "127.0.0.1:6080:6080"
+    networks:
+      - bootstrap
+
+networks:
+  # Isolated network for the login helper so it never shares one with other containers.
+  bootstrap:
+    driver: bridge
+  # Uncomment to reach a consumer running in another stack:
+  # traefik_proxy:
+  #   external: true

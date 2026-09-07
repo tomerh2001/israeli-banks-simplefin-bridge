@@ -1,0 +1,88 @@
+{
+	"success": true,
+	"accounts": [
+		{
+			"accountNumber": "00-000-000001",
+			"balance": 4321.57,
+			"txns": [
+				{
+					"type": "normal",
+					"identifier": 51,
+					"date": "2024-01-31T22:00:00.000Z",
+					"processedDate": "2024-01-31T22:00:00.000Z",
+					"originalAmount": -120.5,
+					"originalCurrency": "ILS",
+					"chargedAmount": -120.5,
+					"description": "עמלת ניהול",
+					"status": "completed",
+					"memo": ""
+				},
+				{
+					"type": "normal",
+					"identifier": 51,
+					"date": "2024-01-31T22:00:00.000Z",
+					"processedDate": "2024-01-31T22:00:00.000Z",
+					"originalAmount": -120.5,
+					"originalCurrency": "ILS",
+					"chargedAmount": -120.5,
+					"description": "עמלת ניהול",
+					"status": "completed",
+					"memo": ""
+				},
+				{
+					"type": "normal",
+					"identifier": 51,
+					"date": "2024-01-31T22:00:00.000Z",
+					"processedDate": "2024-01-31T22:00:00.000Z",
+					"originalAmount": -35,
+					"originalCurrency": "ILS",
+					"chargedAmount": -35,
+					"description": "עמלת ערוץ ישיר",
+					"status": "completed",
+					"memo": ""
+				},
+				{
+					"type": "normal",
+					"identifier": 0,
+					"date": "2024-02-04T22:00:00.000Z",
+					"processedDate": "2024-02-04T22:00:00.000Z",
+					"originalAmount": -250,
+					"originalCurrency": "ILS",
+					"chargedAmount": -250,
+					"description": "משיכת מזומן",
+					"status": "pending",
+					"memo": ""
+				},
+				{
+					"type": "normal",
+					"identifier": 7712,
+					"date": "2024-02-01T22:00:00.000Z",
+					"processedDate": "2024-02-03T22:00:00.000Z",
+					"originalAmount": 15000,
+					"originalCurrency": "ILS",
+					"chargedAmount": 15000,
+					"description": "משכורת",
+					"status": "completed",
+					"memo": "פרטי המוטב: חברה בע\"מ."
+				},
+				{
+					"type": "normal",
+					"identifier": 8801,
+					"date": "2024-02-05T22:00:00.000Z",
+					"processedDate": "2024-02-05T22:00:00.000Z",
+					"originalAmount": -100,
+					"originalCurrency": "USD",
+					"chargedAmount": -370.25,
+					"description": "העברה לחו\"ל",
+					"status": "completed",
+					"memo": ""
+				}
+			]
+		},
+		{
+			"accountNumber": "12-627-999999",
+			"balance": 10,
+			"txns": []
+		}
+	]
+}

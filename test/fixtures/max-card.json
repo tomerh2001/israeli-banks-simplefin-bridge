@@ -1,0 +1,41 @@
+{
+	"success": true,
+	"accounts": [
+		{
+			"accountNumber": "5678",
+			"balance": -1500,
+			"balanceDate": "2024-03-10T00:00:00.000Z",
+			"txns": [
+				{
+					"type": "installments",
+					"status": "completed",
+					"date": "2024-01-10T22:00:00.000Z",
+					"processedDate": "2024-03-09T22:00:00.000Z",
+					"originalAmount": -900,
+					"originalCurrency": "ILS",
+					"chargedAmount": -300,
+					"chargedCurrency": "ILS",
+					"description": "IKEA",
+					"memo": "תשלום 2 מתוך 3",
+					"category": "בית",
+					"installments": {"number": 2, "total": 3},
+					"identifier": "undefined_2"
+				},
+				{
+					"type": "normal",
+					"status": "completed",
+					"date": "2024-03-01T22:00:00.000Z",
+					"processedDate": "2024-03-09T22:00:00.000Z",
+					"originalAmount": -55,
+					"originalCurrency": "ILS",
+					"chargedAmount": -55,
+					"chargedCurrency": "ILS",
+					"description": "SUPER-PHARM",
+					"memo": null,
+					"category": "פארם",
+					"identifier": "ARN123456"
+				}
+			]
+		}
+	]
+}
