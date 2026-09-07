@@ -50,6 +50,14 @@ it with the bank first, then unpark.
 
 ## OTP enrolment and re-enrolment
 
+Hapoalim's `/ng-portals/auth/he/` is its ordinary login page, so a timeout on that URL alone does not prove
+that an SMS code is required. A blank failure screenshot and no `LOGGING_IN` progress event indicate a failure
+before the scraper clicked Submit. Inspect page loading before starting OTP enrolment. On this host, an earlier
+importer recovered from fresh-profile redirect timeouts after receiving a copy of a previously working Chrome
+profile. If reusing that approach, stop all profile writers, archive the destination profile, and copy the old
+profile into the company's dedicated directory with the correct service ownership; never share a live profile
+between importers. Existing device trust may have expired, so verify the result within the daily attempt cap.
+
 Device trust lives in the company's Chrome profile (`data/chrome/<company>`). Re-enrol when the bank asks for a code
 again (profile deleted, cookies expired, bank policy change), which surfaces as `OTP_REQUIRED`.
 
