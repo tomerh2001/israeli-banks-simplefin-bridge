@@ -169,6 +169,35 @@ export function createInvestmentStore(filename: string): InvestmentStore {
 	};
 
 	return {
+		getAutomaticSmsNextAllowedAt(at): InvestmentSourceState['lastAttemptAt'] {
+			const timestamp = Date.parse(z.iso.datetime().parse(at));
+			const row = db.prepare('SELECT value FROM investment_meta WHERE key = ?').get('automatic_sms_attempts');
+			const previous = row ? z.array(z.iso.datetime()).max(2).parse(JSON.parse(String(row.value))) : [];
+			const recent = previous.map(value => Date.parse(value)).filter(value => value > timestamp - 86_400_000);
+			return recent.length >= 2 ? new Date(Math.min(...recent) + 86_400_000).toISOString() : null;
+		},
+		consumeControlRefreshAttempt(at): {allowed: boolean; retryAfterSeconds: number} {
+			const timestamp = Date.parse(z.iso.datetime().parse(at));
+			db.exec('BEGIN IMMEDIATE');
+			try {
+				const row = db.prepare('SELECT value FROM investment_meta WHERE key = ?').get('control_refresh_attempts');
+				const previous = row ? z.array(z.iso.datetime()).max(2).parse(JSON.parse(String(row.value))) : [];
+				const recent = previous.filter(value => Date.parse(value) > timestamp - 60_000);
+				const allowed = recent.length < 2;
+				const retryAfterSeconds = allowed ? 0 : Math.ceil((Math.min(...recent.map(value => Date.parse(value))) + 60_000 - timestamp) / 1000);
+				if (allowed) {
+					recent.push(at);
+					db.prepare('INSERT OR REPLACE INTO investment_meta (key, value) VALUES (?, ?)')
+						.run('control_refresh_attempts', JSON.stringify(recent));
+				}
+
+				db.exec('COMMIT');
+				return {allowed, retryAfterSeconds};
+			} catch (error) {
+				db.exec('ROLLBACK');
+				throw error;
+			}
+		},
 		consumeAutomaticSmsAttempt(attemptedAt): boolean {
 			const timestamp = Date.parse(z.iso.datetime().parse(attemptedAt));
 			db.exec('BEGIN IMMEDIATE');
