@@ -48,6 +48,7 @@ const descriptions: Record<string, string> = {
 	'investments.staleHours': 'Age after which investment data is stale. Default 192 hours.',
 	'investments.timeoutMinutes': 'Maximum time allowed for one collection. Default 10 minutes.',
 	'investments.sessionKeepAliveMinutes': 'Optional native session renewal interval, 1–10 minutes; 0 disables it (default). Never requests SMS or refreshes financial-data timestamps.',
+	'investments.googleMessagesOtpSocket': 'Optional absolute Google Messages OTP Unix socket. Omission disables automatic recovery. Limited to two SMS requests per rolling 24 hours.',
 	'companies.enabled': 'Disabled companies are never scraped and never served. Default true.',
 	'companies.label': 'Human label used for SimpleFIN connection/account names and logs.',
 	'companies.kind': 'Default kind for every account of this company (checking, credit_card, savings, investment).',

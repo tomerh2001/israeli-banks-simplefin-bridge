@@ -85,6 +85,7 @@ describe('argument parsing', () => {
 		expect(parseCommandLine(['mint-token', '--label', 'securo', '--rotate'])).toMatchObject({command: 'mint-token', values: {label: 'securo', rotate: true}});
 		expect(parseCommandLine(['export', '--account', 'a', '--account', 'b', '--to', '2026-02-01'])).toMatchObject({command: 'export', values: {account: ['a', 'b'], to: '2026-02-01'}});
 		expect(parseCommandLine(['--help'])).toEqual({help: true});
+		expect(parseCommandLine(['clal-login', '--manual-otp'])).toMatchObject({command: 'clal-login', values: {'manual-otp': true}});
 		for (const command of COMMANDS) {
 			expect(parseCommandLine([command])).toMatchObject({command});
 		}
@@ -99,6 +100,8 @@ describe('argument parsing', () => {
 		expect(() => parseCommandLine(['clal-login', '123456'])).toThrow(/Unexpected argument/);
 		expect(() => parseCommandLine(['clal-login', '--otp', '123456'])).toThrow(/otp/);
 		expect(() => parseCommandLine(['clal-sync', '--force'])).toThrow(/not valid/);
+		expect(() => parseCommandLine(['clal-sync', '--manual-otp'])).toThrow(/not valid/);
+		expect(() => parseCommandLine(['clal-renew', '--manual-otp'])).toThrow(/not valid/);
 	});
 
 	it('renders aligned tables', () => {
@@ -114,6 +117,9 @@ describe('bridge CLI (child process)', () => {
 		for (const command of COMMANDS) {
 			expect(result.stdout).toContain(`  ${command}`);
 		}
+
+		expect(result.stdout).toContain('clal-login [--manual-otp]');
+		expect(result.stdout).toContain('configured OTP recovery permits one login and retry');
 	});
 
 	it('usage errors exit 2 with the usage text', async () => {
@@ -209,6 +215,7 @@ describe('bridge CLI (child process)', () => {
 		expect(result.code).toBe(1);
 		expect(JSON.parse(result.stdout)).toMatchObject({
 			configured: true, enabled: false, counts: {products: 1, valuations: 1, activities: 0, tracks: 0},
+			automaticOtp: {enabled: false, maxAttemptsPer24Hours: 2},
 			session: {expired: true, verifiedActive: false},
 		});
 		for (const privateValue of ['654321.09', 'CLI-FIXTURE', 'Private fixture pension', 'private-cli-fixture-token', 'private-fixture-id', 'private-fixture-phone']) {

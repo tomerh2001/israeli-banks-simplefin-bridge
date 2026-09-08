@@ -8,12 +8,17 @@ import {redact} from '../log.js';
 import type {InvestmentConfig} from './config.js';
 import {CLAL_LOGIN_URL, CLAL_PORTFOLIO_URL, ClalCollectionError, isClalLogin, withClalBrowser, type ClalBrowserOptions} from './browser.js';
 import {assertClalSessionAuthenticated, readClalSessionRemaining} from './session.js';
+import type {ClalOtpRequest, ClalOtpSource} from './otp.js';
 
 export type ClalLoginOptions = ClalBrowserOptions & {
 	config: InvestmentConfig;
 	secrets: SecretsResolver;
 	/** Called only after the portal confirms that it is waiting for an SMS code. Never persist the code. */
-	readOtp(signal: AbortSignal): Promise<string>;
+	readOtp?(signal: AbortSignal): Promise<string>;
+	/** Optional receiver must become ready before requesting a new SMS. */
+	otpSource?: ClalOtpSource;
+	/** Reserve the persistent SMS budget after receiver readiness, before the sole Send click. */
+	beforeSmsRequest?(signal: AbortSignal): Promise<void>;
 	/** Runs while the profile is owned, only after protected access and lifetime are verified. */
 	onSessionVerified?(remainingSeconds: number): void;
 };
@@ -41,7 +46,7 @@ export async function configureClalLoginDelivery(page: Page): Promise<void> {
 	}
 }
 
-/** Explicit operator command only: scheduled collection must never call this function. */
+/** Request SMS only through explicit login or the configured bounded recovery flow. */
 export async function assistedClalLogin(options: ClalLoginOptions): Promise<void> {
 	await withClalBrowser(options, async (page, signal) => {
 		await page.goto(CLAL_PORTFOLIO_URL, {waitUntil: 'domcontentloaded'});
@@ -57,6 +62,10 @@ export async function assistedClalLogin(options: ClalLoginOptions): Promise<void
 					throw error;
 				}
 			}
+		}
+
+		if (!options.otpSource && !options.readOtp) {
+			throw new ClalCollectionError('OTP_REQUIRED');
 		}
 
 		let credentials: Record<string, string>;
@@ -77,29 +86,39 @@ export async function assistedClalLogin(options: ClalLoginOptions): Promise<void
 		await page.locator('[formcontrolname="tz"]').fill(id);
 		await page.locator('[formcontrolname="mobile"]').fill(phone);
 		await configureClalLoginDelivery(page);
-		await page.locator('::-p-aria(שליחה)').click();
-		await page.waitForSelector('[formcontrolname="otp"]', {visible: true});
-		let code = await options.readOtp(signal);
-		if (!/^\d{6}$/.test(code)) {
-			throw new ClalCollectionError('OTP_REQUIRED');
-		}
-
+		let otpRequest: ClalOtpRequest | undefined;
 		try {
-			await page.locator('[formcontrolname="otp"]').fill(code);
+			otpRequest = await options.otpSource?.prepare(signal);
+			signal.throwIfAborted();
+			await options.beforeSmsRequest?.(signal);
+			signal.throwIfAborted();
+			await page.locator('::-p-aria(שליחה)').click();
+			await page.waitForSelector('[formcontrolname="otp"]', {visible: true});
+			let code = await (otpRequest ? otpRequest.read(signal) : options.readOtp!(signal));
+			if (!/^\d{6}$/.test(code)) {
+				throw new ClalCollectionError('OTP_REQUIRED');
+			}
+
+			try {
+				signal.throwIfAborted();
+				await page.locator('[formcontrolname="otp"]').fill(code);
+			} finally {
+				code = '';
+			}
+
+			await page.locator('::-p-aria(כניסה לחשבון)').click();
+			await page.waitForSelector('[formcontrolname="otp"]', {hidden: true});
+			await page.goto(CLAL_PORTFOLIO_URL, {waitUntil: 'domcontentloaded'});
+			if (await isClalLogin(page)) {
+				throw new ClalCollectionError('OTP_REQUIRED');
+			}
+
+			await assertClalSessionAuthenticated(page);
+			const remainingSeconds = await readClalSessionRemaining(page);
+			signal.throwIfAborted();
+			options.onSessionVerified?.(remainingSeconds);
 		} finally {
-			code = '';
+			await otpRequest?.cancel();
 		}
-
-		await page.locator('::-p-aria(כניסה לחשבון)').click();
-		await page.waitForSelector('[formcontrolname="otp"]', {hidden: true});
-		await page.goto(CLAL_PORTFOLIO_URL, {waitUntil: 'domcontentloaded'});
-		if (await isClalLogin(page)) {
-			throw new ClalCollectionError('OTP_REQUIRED');
-		}
-
-		await assertClalSessionAuthenticated(page);
-		const remainingSeconds = await readClalSessionRemaining(page);
-		signal.throwIfAborted();
-		options.onSessionVerified?.(remainingSeconds);
 	});
 }

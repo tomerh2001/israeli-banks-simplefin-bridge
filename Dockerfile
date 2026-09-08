@@ -12,7 +12,8 @@
 #   base     puppeteer image + Xvfb/noVNC for assisted login + bridge wrapper
 #   deps     full dependency install (dev deps included, for tsc)
 #   build    TypeScript -> dist/
-#   runtime  production dependencies only + dist/ (what gets published)
+#   messages standalone Google Messages OTP receiver
+#   runtime  production dependencies, dist/ and the optional receiver
 #
 # Expected size (measured 2026-09, linux/amd64): the puppeteer base is ~2.0 GB
 # (Chrome and its libraries dominate); the apt layer adds ~350 MB because
@@ -67,6 +68,14 @@ COPY --chown=pptruser:pptruser tsconfig.json tsconfig.build.json ./
 COPY --chown=pptruser:pptruser src src
 RUN yarn build
 
+# The receiver is a separate program; it does not mirror messages into Matrix.
+FROM golang:1.26.6-bookworm AS messages
+WORKDIR /src
+COPY tools/google-messages-otp/go.mod tools/google-messages-otp/go.sum ./
+RUN go mod download
+COPY tools/google-messages-otp/ ./
+RUN CGO_ENABLED=0 go build -trimpath -o /out/google-messages-otp .
+
 # ---------------------------------------------------------------------------
 FROM base AS runtime
 
@@ -94,6 +103,8 @@ console.log(`Verified Puppeteer browser: Chrome ${actual}`);
 NODE
 
 COPY --from=build --chown=pptruser:pptruser /app/dist dist
+COPY --from=messages --chmod=0755 /out/google-messages-otp /usr/local/bin/google-messages-otp
+COPY tools/google-messages-otp/LICENSE /usr/share/licenses/google-messages-otp/LICENSE
 COPY --chown=pptruser:pptruser config.example.json ./
 COPY --chmod=0755 scripts/container-entrypoint.sh /usr/local/bin/bridge-entrypoint
 

@@ -72,8 +72,11 @@ provider collection and must not refresh the provider's success timestamp.
 The runtime should resolve Clal ID and phone references with the existing
 1Password Connect resolver. Use an isolated Clal browser profile, a separate weekly
 schedule, and its own login-attempt guard. An OTP requirement parks collection
-until assisted login completes; scheduled collection must not repeatedly send SMS
-or reduce the bank sources' attempt budgets. The feed serves cached data only.
+until assisted login completes. With Google Messages explicitly configured, a
+collection may make one automatic login attempt and then collect once more.
+Automatic SMS requests have a separate persisted allowance of two per rolling
+24 hours. They do not reduce the bank sources' attempt budgets. The feed serves
+cached data only.
 
 `config.investments` is optional and disabled by default. Its independent schedule
 defaults to Monday at 07:00 in the bridge timezone; the stale threshold is 192
@@ -93,14 +96,16 @@ status or applying an unfinished snapshot.
 ## Operator commands
 
 - `bridge clal-login` performs an explicit assisted login. Credentials come from
-  the configured 1Password references. Only after Clal displays its SMS-code form
-  does the command read a six-digit code from standard input. Terminal entry is
+  the configured 1Password references. A configured Google Messages receiver
+  supplies the code automatically. With `--manual-otp`, or when no receiver is
+  configured, the command reads a six-digit code from standard input only after
+  Clal displays its SMS-code form. Terminal entry is
   hidden, and the original terminal mode is restored on completion, cancellation,
   input errors, and timeout. Piped input is supported; keep the supplying process
   private. Codes are never accepted as command arguments or stored.
 - `bridge clal-sync` collects investments using the saved Clal session. It never
-  requests an SMS code. If authentication expired, run `clal-login`, followed by
-  `clal-sync`.
+  requests an SMS code unless Google Messages recovery is explicitly configured.
+  Otherwise, if authentication expired, run `clal-login`, followed by `clal-sync`.
 - `bridge clal-renew` explicitly checks protected account access and renews an
   existing Clal session. It never logs in, requests SMS, or applies financial
   snapshots. A busy profile is skipped; an unavailable/expired session exits one.
@@ -154,6 +159,35 @@ Maintenance never changes valuation dates, source collection timestamps,
 inventory completeness or financial records. Reading status never triggers a
 renewal. Shutdown aborts maintenance and closes its browser before releasing
 the profile or database.
+
+## Google Messages login recovery
+
+`investments.googleMessagesOtpSocket` optionally selects a local Google Messages
+receiver. Omit it to leave automatic SMS login disabled. The standalone receiver
+is included as `google-messages-otp`; pairing, sender configuration and its Unix
+socket contract are documented in `tools/google-messages-otp/README.md`.
+
+Run the receiver in a companion container with only its private state directory
+mounted. Both processes need access to its mode0600 Unix socket. Initial Google
+sign-in and phone emoji confirmation are required. The Google account must match
+the account selected in Google Messages on the phone. Pairing can later expire;
+a receiver requiring Google authentication stays unavailable until repaired.
+
+An automatic login first verifies receiver readiness and reserves a single code
+request, then atomically spends its SMS allowance immediately before clicking
+Clal's Send button. Even an uncertain click counts. The receiver accepts only a
+new incoming Clal SMS from configured sender addresses, with matching six-digit
+codes in the Hebrew message and exact Clal website footer. It rejects old,
+ambiguous and already consumed messages. Codes stay in memory and never enter
+logs or persistent storage. Pairing credentials and hashes of consumed message
+IDs remain in the private receiver directory.
+
+A collection may recover once from confirmed expired authentication. Failed
+pairing, an offline phone, an unavailable receiver, an exhausted allowance or an
+unsuccessful OTP ends that recovery without a resend. Automatic recovery never
+runs from the session-maintenance timer or a feed/status read. The importer
+verifies protected Clal account access before accepting the login and refreshing
+financial data. `clal-login --manual-otp` remains available for explicit recovery.
 
 ## Profile lock recovery
 

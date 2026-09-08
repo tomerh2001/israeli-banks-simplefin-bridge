@@ -43,6 +43,8 @@ export type InvestmentStore = {
 	getSessionState(): ClalSessionState;
 	/** Does not change financial records or source freshness. */
 	setSessionState(state: ClalSessionState): void;
+	/** Atomically reserve one of two automatic SMS attempts in a rolling 24-hour window. Never refunded after an uncertain send. */
+	consumeAutomaticSmsAttempt(attemptedAt: string): boolean;
 	getFeed(now: Date, staleAfterHours: number): InvestmentFeed;
 	close(): void;
 };

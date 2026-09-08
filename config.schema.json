@@ -234,6 +234,12 @@
           "minimum": 0,
           "maximum": 10,
           "description": "Optional native session renewal interval, 1–10 minutes; 0 disables it (default). Never requests SMS or refreshes financial-data timestamps."
+        },
+        "googleMessagesOtpSocket": {
+          "type": "string",
+          "maxLength": 107,
+          "pattern": "^\\/[^\\0]+$",
+          "description": "Optional absolute Google Messages OTP Unix socket. Omission disables automatic recovery. Limited to two SMS requests per rolling 24 hours."
         }
       },
       "additionalProperties": false,

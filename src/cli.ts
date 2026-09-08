@@ -32,6 +32,7 @@ import {createInvestmentRuntime} from './investments/runtime.js';
 import {createInvestmentStore} from './investments/store.js';
 import {renewClalSession} from './investments/session.js';
 import {getClalSessionStatus} from './investments/router.js';
+import {automaticClalLogin, clalSessionVerifiedCallback, createClalRecoveryCollector} from './investments/recovery.js';
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 const ANOMALY_LIMIT = 20;
@@ -350,27 +351,21 @@ async function withCommandSignal(work: (signal: AbortSignal) => Promise<number>)
 	}
 }
 
-async function commandClalLogin(context: BridgeContext): Promise<number> {
+async function commandClalLogin(context: BridgeContext, args: ParsedArgs): Promise<number> {
 	const config = requireClalConfig(context);
 	return withCommandSignal(async signal => {
 		const store = createInvestmentStore(path.join(context.env.dataDir, 'investments.sqlite'));
 		try {
-			await assistedClalLogin({
-				config, env: {...context.env, showBrowser: true}, secrets: context.secrets,
-				timeoutMinutes: config.timeoutMinutes, signal, readOtp: readOneTimeCode,
-				onSessionVerified(remainingSeconds) {
-					if (signal.aborted) {
-						return;
-					}
+			if (config.googleMessagesOtpSocket && args.values['manual-otp'] !== true) {
+				await automaticClalLogin({config, env: context.env, secrets: context.secrets, logger: context.logger.child('investments'), store, signal});
+			} else {
+				await assistedClalLogin({
+					config, env: {...context.env, showBrowser: true}, secrets: context.secrets,
+					timeoutMinutes: config.timeoutMinutes, signal, readOtp: readOneTimeCode,
+					onSessionVerified: clalSessionVerifiedCallback(store, signal),
+				});
+			}
 
-					const now = new Date();
-					store.setSessionState({
-						status: 'active', lastCheckedAt: now.toISOString(),
-						lastRenewedAt: store.getSessionState().lastRenewedAt,
-						expiresAt: new Date(now.getTime() + (remainingSeconds * 1000)).toISOString(), errorCode: null,
-					});
-				},
-			});
 			print('Clal login completed. Run "bridge clal-sync" to refresh investments.');
 			return 0;
 		} finally {
@@ -399,16 +394,17 @@ async function commandClalRenew(context: BridgeContext): Promise<number> {
 
 async function commandClalSync(context: BridgeContext): Promise<number> {
 	const config = requireClalConfig(context);
+	const collect = createClalRecoveryCollector(collectClal);
 	return withCommandSignal(async signal => {
 		const runtime = await createInvestmentRuntime({
 			config, env: context.env, secrets: context.secrets, logger: context.logger.child('investments'),
 			timezone: context.config.timezone,
-			collect: async input => collectClal({...input, signal: AbortSignal.any([input.signal, signal])}),
+			collect: async input => collect({...input, signal: AbortSignal.any([input.signal, signal])}),
 		});
 		try {
 			const status = await runtime.runNow();
 			if (status === 'auth_required') {
-				print('Clal needs SMS approval. Run "bridge clal-login", then "bridge clal-sync".');
+				print('Clal needs SMS approval. Run "bridge clal-login --manual-otp", then "bridge clal-sync".');
 			} else {
 				print(`Clal collection: ${status ?? 'unavailable'}`);
 			}
@@ -435,6 +431,7 @@ function commandClalStatus(context: BridgeContext): number {
 		const stale = lastSuccess === undefined || now.getTime() - lastSuccess > config.staleHours * 3_600_000;
 		print(JSON.stringify({
 			configured: true, enabled: config.enabled, source: feed.source, stale,
+			automaticOtp: {enabled: Boolean(config.googleMessagesOtpSocket), maxAttemptsPer24Hours: 2},
 			session: getClalSessionStatus(store.getSessionState(), now, config.sessionKeepAliveMinutes),
 			counts: {products: feed.products.length, valuations: feed.valuations.length, activities: feed.activities.length, tracks: feed.tracks.length},
 		}, null, 2));
@@ -487,7 +484,7 @@ async function dispatch(context: BridgeContext, args: ParsedArgs): Promise<numbe
 		}
 
 		case 'clal-login': {
-			return commandClalLogin(context);
+			return commandClalLogin(context, args);
 		}
 
 		case 'clal-sync': {
