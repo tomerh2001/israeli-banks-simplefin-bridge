@@ -2,7 +2,7 @@ module github.com/tomerh2001/israeli-banks-simplefin-bridge/tools/google-message
 
 go 1.25.0
 
-toolchain go1.26.6
+toolchain go1.27.1
 
 require (
 	github.com/rs/zerolog v1.35.1

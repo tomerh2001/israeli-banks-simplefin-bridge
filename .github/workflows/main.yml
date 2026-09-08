@@ -39,7 +39,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v7
         with:
-          go-version: '1.26.6'
+          go-version: '1.27.1'
           cache-dependency-path: tools/google-messages-otp/go.sum
 
       - name: Check Google Messages receiver
