@@ -205,6 +205,20 @@ amounts and credentials in the private artifacts.
    describe merged manual transactions, so verify stored transaction counts rather than treating that return
    value as the import total.
 
+### Review Securo transfer matches after backfill
+
+Securo can infer transfer pairs from opposite amounts on different accounts with nearby dates. During this
+recovery it paired two ordinary card purchase debits with bank credits without supporting transfer evidence.
+Source identity and amount
+verification alone will not catch that reporting change: inspect newly assigned `transfer_pair_id` values and
+verify the source descriptions and direction of both legs. Clear unsupported pairs through the native
+`transfer_detection_service.unlink_transfer_pair` operation, preserving the financial records and categories.
+
+The current model has no permanent “never pair these transactions” flag. An unchanged cached sync only
+considers newly imported rows and does not recreate an old-to-old pair, but a global manual transfer-detection
+run or another nearby historical import can reconsider it. Keep the private pair review so the decision is
+reproducible. Pairing a bank credit with a card purchase is not established merely because their amounts match.
+
 ### Hapoalim history can stop at 150 rows
 
 On 2026-09-08, Hapoalim returned `numItemsPerPage: 150` even though the request specified `1000`. The normal
