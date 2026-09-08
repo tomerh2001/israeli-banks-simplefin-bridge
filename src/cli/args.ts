@@ -22,7 +22,7 @@ export type Command =
 	| 'clal-status'
 	| 'serve';
 
-export type OptionName = 'config' | 'data-dir' | 'verbose' | 'help' | 'from' | 'to' | 'force' | 'label' | 'rotate' | 'account';
+export type OptionName = 'config' | 'data-dir' | 'verbose' | 'help' | 'from' | 'to' | 'force' | 'label' | 'rotate' | 'account' | 'manual-otp';
 
 export type ParsedArgs = {
 	command: Command;
@@ -45,6 +45,7 @@ const OPTIONS = {
 	label: {type: 'string'},
 	rotate: {type: 'boolean'},
 	account: {type: 'string', multiple: true},
+	'manual-otp': {type: 'boolean'},
 } satisfies ParseArgsConfig['options'];
 
 const GLOBAL_OPTIONS: OptionName[] = ['config', 'data-dir', 'verbose', 'help'];
@@ -61,7 +62,7 @@ const COMMANDS: Record<Command, {options: OptionName[]; positional?: 'company'}>
 	audit: {options: []},
 	export: {options: ['account', 'from', 'to']},
 	health: {options: []},
-	'clal-login': {options: []},
+	'clal-login': {options: ['manual-otp']},
 	'clal-sync': {options: []},
 	'clal-renew': {options: []},
 	'clal-status': {options: []},
@@ -86,8 +87,10 @@ Commands:
   export [--account <id>]... [--from YYYY-MM-DD] [--to YYYY-MM-DD]
                           Securo-import CSV to stdout (from inclusive, to exclusive).
   health                  Print the health report as JSON; exit 0 when ok, else 1.
-  clal-login              Request Clal SMS authentication; enter the code privately on stdin.
-  clal-sync               Collect Clal investments using the saved session; never request SMS.
+  clal-login [--manual-otp]
+                          Request Clal SMS authentication; use the receiver when configured,
+                          otherwise private stdin. --manual-otp forces stdin and bypasses the automatic allowance.
+  clal-sync               Collect Clal investments; configured OTP recovery permits one login and retry.
   clal-renew              Renew an authenticated Clal session; never request SMS or collect data.
   clal-status             Print Clal source/session health and record counts as JSON.
   serve                   Start the SimpleFIN server and the scheduler (same as node dist/index.js).
@@ -139,7 +142,7 @@ export function parseCommandLine(args: string[]): ParsedArgs | {help: true} {
 
 	if (rest.length > (spec.positional ? 1 : 0)) {
 		if (name.startsWith('clal-')) {
-			throw new UsageError(`Unexpected argument for "${name}"; OTP codes are accepted only on stdin`);
+			throw new UsageError(`Unexpected argument for "${name}"; OTP codes must not be command arguments`);
 		}
 
 		throw new UsageError(`Unexpected argument "${rest.at(-1)}" for "${name}"`);

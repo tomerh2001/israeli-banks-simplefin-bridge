@@ -1,6 +1,7 @@
 import {mkdtempSync, rmSync} from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import {DatabaseSync} from 'node:sqlite';
 import {afterEach, describe, expect, it} from 'vitest';
 import {investmentActivityId, investmentProductId, investmentValuationId} from './ids.js';
 import {investmentActivitySchema, investmentMoneySchema, investmentSnapshotSchema} from './schema.js';
@@ -43,6 +44,70 @@ afterEach(() => {
 	}
 
 	opened.length = 0;
+});
+
+describe('persistent automatic Clal SMS allowance', () => {
+	it('allows two attempts in a rolling day, retaining future reservations after a clock rollback', () => {
+		const store = open();
+		expect(store.consumeAutomaticSmsAttempt('2026-09-08T06:00:00.000Z')).toBe(true);
+		expect(store.consumeAutomaticSmsAttempt('2026-09-08T07:00:00.000Z')).toBe(true);
+		expect(store.consumeAutomaticSmsAttempt('2026-09-08T08:00:00.000Z')).toBe(false);
+		expect(store.consumeAutomaticSmsAttempt('2026-09-07T06:00:00.000Z')).toBe(false);
+		expect(store.consumeAutomaticSmsAttempt('2026-09-09T05:59:59.999Z')).toBe(false);
+		expect(store.consumeAutomaticSmsAttempt('2026-09-09T06:00:00.000Z')).toBe(true);
+		expect(store.consumeAutomaticSmsAttempt('2026-09-09T06:00:00.000Z')).toBe(false);
+	});
+
+	it('preserves the allowance across independent handles and process restarts', () => {
+		const directory = mkdtempSync(path.join(os.tmpdir(), 'clal-sms-budget-'));
+		const filename = path.join(directory, 'investments.sqlite');
+		const first = createInvestmentStore(filename);
+		const second = createInvestmentStore(filename);
+		try {
+			expect(first.consumeAutomaticSmsAttempt(observedAt)).toBe(true);
+			expect(second.consumeAutomaticSmsAttempt(observedAt)).toBe(true);
+			expect(first.consumeAutomaticSmsAttempt(observedAt)).toBe(false);
+		} finally {
+			first.close();
+			second.close();
+		}
+
+		const restarted = createInvestmentStore(filename);
+		try {
+			expect(restarted.consumeAutomaticSmsAttempt(observedAt)).toBe(false);
+		} finally {
+			restarted.close();
+			rmSync(directory, {recursive: true, force: true});
+		}
+	});
+
+	it('does not change financial records, source freshness, or session health when reserving requests', () => {
+		const store = open();
+		store.applySnapshot(fixture());
+		const before = store.getFeed(new Date(observedAt), 192);
+		const session = store.getSessionState();
+		store.consumeAutomaticSmsAttempt(observedAt);
+		store.consumeAutomaticSmsAttempt(observedAt);
+		expect(store.consumeAutomaticSmsAttempt(observedAt)).toBe(false);
+		expect(store.getFeed(new Date(observedAt), 192)).toEqual(before);
+		expect(store.getSessionState()).toEqual(session);
+	});
+
+	it('fails closed on a corrupt reservation record without resetting the allowance', () => {
+		const directory = mkdtempSync(path.join(os.tmpdir(), 'clal-sms-budget-corrupt-'));
+		const filename = path.join(directory, 'investments.sqlite');
+		const store = createInvestmentStore(filename);
+		const external = new DatabaseSync(filename);
+		external.prepare('INSERT INTO investment_meta (key,value) VALUES (?,?)').run('automatic_sms_attempts', '{"bad":"state"}');
+		try {
+			expect(() => store.consumeAutomaticSmsAttempt(observedAt)).toThrow();
+			expect(external.prepare('SELECT value FROM investment_meta WHERE key = ?').get('automatic_sms_attempts')?.value).toBe('{"bad":"state"}');
+		} finally {
+			store.close();
+			external.close();
+			rmSync(directory, {recursive: true, force: true});
+		}
+	});
 });
 
 describe('investment contracts', () => {

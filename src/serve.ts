@@ -17,6 +17,7 @@ import {startServer} from './simplefin/server.js';
 import {createInvestmentRuntime, type InvestmentCollector, type InvestmentRuntime} from './investments/runtime.js';
 import {collectClal} from './investments/reader.js';
 import {renewClalSession} from './investments/session.js';
+import {createClalRecoveryCollector} from './investments/recovery.js';
 import type {CompanyId, Config, Ledger, RunRecord, RuntimeEnv, SecretsResolver} from './types.js';
 
 /** Everything a command needs to talk to the ledger and the banks. */
@@ -156,7 +157,7 @@ export async function serve(options: ServeOptions = {}): Promise<RunningBridge> 
 	const investments = config.investments?.enabled
 		? await createInvestmentRuntime({
 			config: config.investments, env, secrets, logger: logger.child('investments'), timezone: config.timezone,
-			collect: options.investmentCollector ?? collectClal, maintainSession: renewClalSession,
+			collect: createClalRecoveryCollector(options.investmentCollector ?? collectClal), maintainSession: renewClalSession,
 		})
 		: undefined;
 	const server = await startServer({config, ledger, logger: logger.child('http'), investmentRouter: investments?.router});

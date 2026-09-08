@@ -10,6 +10,8 @@ export const investmentConfigSchema = z.strictObject({
 	timeoutMinutes: z.number().int().min(1).max(30).default(10),
 	/** Opt in to session-only renewal; disabled by default and never requests an SMS. */
 	sessionKeepAliveMinutes: z.number().int().min(0).max(10).default(0),
+	/** A dedicated local OTP receiver; omission keeps every SMS request operator initiated. */
+	googleMessagesOtpSocket: z.string().regex(/^\/[^\0]+$/).max(107).optional(),
 });
 
 export type InvestmentConfig = z.infer<typeof investmentConfigSchema>;

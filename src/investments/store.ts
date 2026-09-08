@@ -1,4 +1,5 @@
 import {DatabaseSync} from 'node:sqlite';
+import {z} from 'zod';
 import {investmentActivityId, investmentProductId, investmentValuationId} from './ids.js';
 import {clalSessionStateSchema, investmentFeedSchema, investmentSnapshotSchema, investmentSourceStateSchema} from './schema.js';
 import type {
@@ -168,6 +169,29 @@ export function createInvestmentStore(filename: string): InvestmentStore {
 	};
 
 	return {
+		consumeAutomaticSmsAttempt(attemptedAt): boolean {
+			const timestamp = Date.parse(z.iso.datetime().parse(attemptedAt));
+			db.exec('BEGIN IMMEDIATE');
+			try {
+				const row = db.prepare('SELECT value FROM investment_meta WHERE key = ?').get('automatic_sms_attempts');
+				const previous = row ? z.array(z.iso.datetime()).max(2).parse(JSON.parse(String(row.value))) : [];
+				// Retain future timestamps if the wall clock moves backwards: a clock
+				// adjustment cannot silently replenish the request allowance.
+				const recent = previous.filter(value => Date.parse(value) > timestamp - 86_400_000);
+				const allowed = recent.length < 2;
+				if (allowed) {
+					recent.push(attemptedAt);
+					db.prepare('INSERT OR REPLACE INTO investment_meta (key, value) VALUES (?, ?)')
+						.run('automatic_sms_attempts', JSON.stringify(recent));
+				}
+
+				db.exec('COMMIT');
+				return allowed;
+			} catch (error) {
+				db.exec('ROLLBACK');
+				throw error;
+			}
+		},
 		getSessionState(): ClalSessionState {
 			const row = db.prepare('SELECT value FROM investment_meta WHERE key = ?').get('session_state');
 			return row
