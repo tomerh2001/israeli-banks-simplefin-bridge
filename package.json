@@ -44,5 +44,5 @@
     "vitest": "^3.2.4",
     "xo": "^4.0.0"
   },
-  "packageManager": "yarn@4.12.0"
+  "packageManager": "yarn@4.18.0"
 }
