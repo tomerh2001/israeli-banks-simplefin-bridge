@@ -4,7 +4,7 @@ import {createServer, type IncomingMessage, type Server, type ServerResponse} fr
 import os from 'node:os';
 import path from 'node:path';
 import {afterEach, describe, expect, it} from 'vitest';
-import {createGoogleMessagesOtpSource} from './otp.js';
+import {createGoogleMessagesOtpSource, readGoogleMessagesHealth} from './otp.js';
 
 const fixtures: Array<{server: Server; directory: string}> = [];
 const requestId = 'synthetic-opaque-request-123456789';
@@ -21,7 +21,7 @@ async function receiver(handler: (request: IncomingMessage, response: ServerResp
 	await new Promise<void>(resolve => {
 		server.listen(socketPath, resolve);
 	});
-	return createGoogleMessagesOtpSource(socketPath);
+	return {...createGoogleMessagesOtpSource(socketPath), health: async () => readGoogleMessagesHealth(socketPath)};
 }
 
 function lease(lifetime = 180_000) {
@@ -42,6 +42,31 @@ afterEach(async () => {
 });
 
 describe('Google Messages OTP Unix socket client', () => {
+	it.each([
+		[{online: true, state: 'ready'}, {ready: true, reason: 'ready'}],
+		[{online: false, state: 'phone_unavailable'}, {ready: false, reason: 'phone_unavailable'}],
+		[{online: false, state: 'reauth_required'}, {ready: false, reason: 'reauth_required'}],
+		[{online: false, state: 'ready'}, {ready: false, reason: 'unavailable'}],
+		[{online: true, state: 'private message 123456'}, {ready: false, reason: 'unavailable'}],
+		[{online: true, state: 'ready', code: '123456'}, {ready: false, reason: 'unavailable'}],
+	])('reads only sanitized receiver health for %j', async (value, expected) => {
+		const operations: string[] = [];
+		const source = await receiver((request, response) => {
+			operations.push(`${request.method} ${request.url}`);
+			json(response, 200, value);
+		});
+		expect(await source.health()).toEqual(expected);
+		expect(operations).toEqual(['GET /healthz']);
+	});
+
+	it('returns safe unavailable health on socket failure and redirects', async () => {
+		expect(await readGoogleMessagesHealth('/nonexistent/synthetic-receiver.sock')).toEqual({ready: false, reason: 'unavailable'});
+		const source = await receiver((_request, response) => {
+			response.writeHead(302, {Location: 'https://example.invalid'}).end('private receiver details');
+		});
+		expect(await source.health()).toEqual({ready: false, reason: 'unavailable'});
+	});
+
 	it('arms once, consumes a code once, and releases the same lease without inbox access', async () => {
 		const current = lease();
 		const operations: string[] = [];

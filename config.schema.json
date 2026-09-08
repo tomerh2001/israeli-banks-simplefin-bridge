@@ -194,6 +194,10 @@
           "type": "string",
           "description": "Dedicated investment read bearer token or op:// reference. Missing or unavailable token disables only the investment feed."
         },
+        "controlToken": {
+          "default": "",
+          "type": "string"
+        },
         "credentials": {
           "default": {},
           "type": "object",
