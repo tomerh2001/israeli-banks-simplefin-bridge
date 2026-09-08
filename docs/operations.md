@@ -147,6 +147,90 @@ Restoring: stop, replace `data/`, restore the configured runtime ownership/ACLs,
 `meta.id_scheme_version` than the running image is refused at startup; that is deliberate, see
 [architecture.md](./architecture.md#id-scheme-id_scheme_version--1).
 
+## Recovering history from retired importers
+
+A successful scrape establishes what the source returned, not complete account history. A requested start date
+can be clamped by the bank, and CAL can filter by purchase date while the bridge books transactions on charge
+date. Check both dates when comparing archive coverage with a fresh scrape. A database's last checkpoint also
+does not establish the last successful bank refresh or prove that a gap contains no activity.
+
+Keep extracts, comparison scripts, raw records, checksums and the review manifest outside the repository. On
+this host, use `/mnt/Pool/Services/Data/israeli-banks-bridge/migration/` with mode 0700 and files mode 0600.
+Share aggregate counts and date ranges in operational documentation; keep account identifiers, descriptions,
+amounts and credentials in the private artifacts.
+
+1. **Inventory before recovery.** Compare retired Actual SQLite caches, Sure SQL backups and PostgreSQL data
+   directories by size, timestamp and database version. Read SQLite with `mode=ro`, `PRAGMA query_only=ON` and
+   a read transaction. A targeted Sure SQL export needs accounts, entries and their transaction records; select
+   the intended bank/card accounts, transaction entries and non-excluded rows. Leave valuations and investment
+   accounts outside a bank/card recovery.
+2. **Recover PostgreSQL on a copy.** Check shutdown state and major version, then copy the retired data into
+   the private migration directory. Start that copy with the matching PostgreSQL major version, `--network none`
+   and read-only SQL transactions. Startup may write to the copy; the original stays untouched. Export only the
+   selected accounts and joined entries/transactions, record checksums and provenance, then stop and remove the
+   temporary container. Compare older and newer exports before assuming the newer one is a superset.
+3. **Normalize with source evidence.** Sure expense amounts are positive; negate the signed entry amount for
+   the bridge. Actual amounts are signed integer cents. Preserve CAL's `Processed date` from Sure notes as the
+   charge date and keep the purchase date separately. Old Actual imports may retain only the purchase or
+   installment date: preserve that known date, leave `chargeDate` absent, and record this limitation in raw
+   provenance. Do not infer a billing day. Verify currency from the archive's account/source context.
+4. **Compare identities and multiplicity.** Match the company and original account/card first. Use the source
+   identifier together with dates, signed amount, original description, memo and installment fields. Bank
+   references can repeat across unrelated transactions, and CAL installments can reuse an identifier in
+   different months. Identical merchant, date and amount do not prove a duplicate when source identifiers or
+   purchase dates differ. Conversely, repeated archive rows with identical fields and one reused reference
+   need evidence of distinct transactions; assigning ordinal IDs does not supply that evidence. Different native
+   IDs also do not prove distinct transactions when an archive uses purchase dates and the current feed uses
+   charge dates: compare the original purchase date and source identity before retaining both. Preserve
+   unresolved groups in a separate review file.
+5. **Prepare a reviewable transaction manifest.** Prefer a verified newer archive while retaining older records
+   it lacks. Exclude rows already represented in the current ledger, synthetic reconciliations, opening/closing
+   valuations, and aggregate card-payment legs that lack an original card mapping. Treat old no-ID card rows
+   that resemble a later settlement as unresolved until their posting can be established. Record every include,
+   exclusion and unresolved match with its source provenance. Preserve the real scraper identifier or CSV source
+   reference; use a deterministic archive identifier only when the original identifier is unavailable. Keep the
+   original memo separate from Sure's appended importer metadata, which belongs in `raw`. Use the bridge's
+   `assignTransactionIds` with the reconstructed fields and check for collisions with existing IDs before import.
+6. **Back up and insert through the native ledger.** Take consistent bridge and destination backups and record
+   the existing accounts, balances, source states, runs and transactions. Serialize the operation with scraping
+   and destination sync. Insert only reviewed historical transactions through `ledger.upsertTransactions`;
+   do not replace the ledger or call account/source/run update methods. Give newly inserted rows the actual
+   import time in `firstSeen` and `lastSeen`, so the next incremental SimpleFIN fetch can discover old dates.
+   Inspect the upsert summary and anomalies, and confirm all protected state remains unchanged.
+7. **Sync the existing Securo connection and verify twice.** Use Securo's native cached connection sync; it reads
+   the bridge ledger and does not log into the banks. Reuse the existing connection and linked accounts. Compare
+   the imported external IDs, account mapping, dates, signed amounts, currencies and descriptions with the
+   manifest. Verify historical and current rows, current balances and the preserved manual accounts separately.
+   A second cached sync should add no transactions or duplicate external IDs. Securo's sync return count can
+   describe merged manual transactions, so verify stored transaction counts rather than treating that return
+   value as the import total.
+
+### Hapoalim history can stop at 150 rows
+
+On 2026-09-08, Hapoalim returned `numItemsPerPage: 150` even though the request specified `1000`. The normal
+year-range scrape had returned 150 rows starting on May 5. A single request to the same authenticated
+`/current-account/transactions` endpoint with `retrievalStartDate=20260427` and `retrievalEndDate=20260504`
+returned nine posted transactions inside that range, with `eventCounter: 9`. The response's `retrievalMinDate`
+was `20240908`, so May 5 was not the oldest accessible date in that session. This observation establishes the
+returned page size and successful gap recovery; it does not establish that every historical interval is complete.
+
+The installed scraper makes one transaction request per account and discards response metadata. It has no
+pagination or date-window subdivision. [Upstream PR #738](https://github.com/eshaham/israeli-bank-scrapers/pull/738)
+previously raised the requested row limit from 150 to 1,000, but that change alone did not prevent the observed
+150-row response. The scraper also fixes the upper date bound to today and clamps the lower bound to about one
+year ago, so changing `startDate` alone cannot request an isolated older interval. Another implementation uses
+[date-window subdivision](https://github.com/zenmoney/ZenPlugins/blob/c7af1ee865ae40482694f572e8205babcb8aaf15/src/plugins/hapoalim/api.js#L1508)
+when a response reaches its assumed limit; the bridge does not yet implement this.
+
+For a known gap, preserve the response's `numItemsPerPage`, `retrievalTransactionData` date bounds and
+`eventCounter` before conversion. These fields are described in the
+[Hapoalim response schema](https://github.com/Urigo/accounter-fullstack/blob/c7932d82771f47f94a854a45ee2c7901babf839b/packages/modern-poalim-scraper/src/zod-schemas/hapoalim-ils-checking-transactions-schema.ts).
+Use an explicitly bounded date range and the configured account selector, with no concurrent browser profile
+writer. Reserve the diagnostic login in the normal daily attempt counter before login; preserve every other
+source-state field. Save the response privately and normalize only its transactions for duplicate review before
+insertion. Keep current account balances, freshness and run history unchanged. Do not invent page-number
+parameters or claim complete backfill from a successful, potentially capped response.
+
 ## Upgrading
 
 ```sh
