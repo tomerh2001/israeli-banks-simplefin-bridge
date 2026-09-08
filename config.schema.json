@@ -245,6 +245,63 @@
       "additionalProperties": false,
       "description": "Optional dedicated Clal investment collection and feed, separate from SimpleFIN bank accounts."
     },
+    "bestInvest": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "default": false,
+          "type": "boolean"
+        },
+        "readToken": {
+          "default": "",
+          "type": "string"
+        },
+        "credentials": {
+          "default": {},
+          "type": "object",
+          "properties": {
+            "id": {
+              "default": "",
+              "type": "string"
+            },
+            "phone": {
+              "default": "",
+              "type": "string"
+            },
+            "email": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "schedule": {
+          "default": "30 3 * * *",
+          "type": "string"
+        },
+        "staleHours": {
+          "default": 72,
+          "type": "integer",
+          "minimum": 1
+        },
+        "timeoutMinutes": {
+          "default": 10,
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 30
+        },
+        "sessionKeepAliveMinutes": {
+          "default": 0,
+          "type": "number",
+          "const": 0
+        },
+        "googleMessagesOtpSocket": {
+          "type": "string",
+          "maxLength": 107,
+          "pattern": "^\\/[^\\0]+$"
+        }
+      },
+      "additionalProperties": false
+    },
     "server": {
       "default": {},
       "type": "object",

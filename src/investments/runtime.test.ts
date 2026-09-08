@@ -92,7 +92,7 @@ describe('scheduled Clal collection retries', () => {
 		expect(collect).toHaveBeenCalledTimes(21);
 		await vi.advanceTimersByTimeAsync(1_200_000);
 		expect(collect).toHaveBeenCalledTimes(21);
-		expect(logger.warn).toHaveBeenCalledExactlyOnceWith('Clal scheduled collection retry window expired');
+		expect(logger.warn).toHaveBeenCalledExactlyOnceWith('investment scheduled collection retry window expired');
 		expect(runtime.store!.getFeed(new Date(beforeFeed.generatedAt), 192)).toEqual(beforeFeed);
 	});
 

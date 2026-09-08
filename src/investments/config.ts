@@ -15,3 +15,15 @@ export const investmentConfigSchema = z.strictObject({
 });
 
 export type InvestmentConfig = z.infer<typeof investmentConfigSchema>;
+
+export const bestInvestConfigSchema = investmentConfigSchema.extend({
+	credentials: z.strictObject({
+		id: z.string().default(''), phone: z.string().default(''), email: z.string().optional(),
+	}).prefault({}),
+	schedule: z.string().default('30 3 * * *'),
+	staleHours: z.number().int().min(1).default(72),
+	// Best Invest does not expose a verified session renewal contract.
+	sessionKeepAliveMinutes: z.literal(0).default(0),
+});
+
+export type BestInvestConfig = z.infer<typeof bestInvestConfigSchema>;

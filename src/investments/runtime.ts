@@ -7,7 +7,7 @@ import {ClalCollectionError, ClalProfileBusyError, type ClalBrowserOptions} from
 import type {InvestmentConfig} from './config.js';
 import {createInvestmentRouter} from './router.js';
 import {createInvestmentStore} from './store.js';
-import type {ClalSessionState, InvestmentStore} from './types.js';
+import type {ClalSessionState, InvestmentProvider, InvestmentStore} from './types.js';
 
 export type InvestmentCollectionContext = {
 	config: InvestmentConfig;
@@ -28,6 +28,7 @@ export type InvestmentRuntimeOptions = Omit<InvestmentCollectionContext, 'store'
 	/** Renews an existing session and returns its verified remaining lifetime, without requesting an SMS. */
 	maintainSession?: (options: ClalBrowserOptions) => Promise<number>;
 	now?: () => Date;
+	provider?: InvestmentProvider;
 };
 
 export type InvestmentRuntime = {
@@ -45,10 +46,12 @@ export type InvestmentRuntime = {
 /** Independent lifecycle: no startup collection, bank ledger writes, or SimpleFIN credentials. */
 export async function createInvestmentRuntime(options: InvestmentRuntimeOptions): Promise<InvestmentRuntime> {
 	const {config, env, secrets, logger} = options;
+	const provider = options.provider ?? 'clal';
+	const isBestInvest = provider === 'hachshara_best_invest';
 	const now = options.now ?? (() => new Date());
 	let store: InvestmentStore | undefined;
 	try {
-		store = createInvestmentStore(path.join(env.dataDir, 'investments.sqlite'));
+		store = createInvestmentStore(path.join(env.dataDir, isBestInvest ? 'best-invest.sqlite' : 'investments.sqlite'), provider);
 	} catch {
 		logger.error('investment database unavailable; bank service remains available');
 	}
@@ -66,6 +69,7 @@ export async function createInvestmentRuntime(options: InvestmentRuntimeOptions)
 	const router = createInvestmentRouter({
 		store, readToken, staleHours: config.staleHours,
 		sessionKeepAliveMinutes: config.sessionKeepAliveMinutes, logger, now,
+		feedPath: isBestInvest ? '/investments/best-invest/v1' : '/investments/v1',
 	});
 	let task: ScheduledTask | undefined;
 	let sessionTimer: ReturnType<typeof setInterval> | undefined;
@@ -190,7 +194,7 @@ export async function createInvestmentRuntime(options: InvestmentRuntimeOptions)
 
 		if (Date.now() > attempt.deadline) {
 			scheduledCollection = undefined;
-			logger.warn('Clal scheduled collection retry window expired');
+			logger.warn('investment scheduled collection retry window expired');
 			return;
 		}
 
@@ -200,7 +204,7 @@ export async function createInvestmentRuntime(options: InvestmentRuntimeOptions)
 		} catch {
 			if (scheduledCollection === attempt) {
 				scheduledCollection = undefined;
-				logger.error('Clal scheduled collection failed');
+				logger.error('investment scheduled collection failed');
 			}
 
 			return;
@@ -219,7 +223,7 @@ export async function createInvestmentRuntime(options: InvestmentRuntimeOptions)
 
 		if (Date.now() + 30_000 > attempt.deadline) {
 			scheduledCollection = undefined;
-			logger.warn('Clal scheduled collection retry window expired');
+			logger.warn('investment scheduled collection retry window expired');
 			return;
 		}
 
@@ -271,7 +275,7 @@ export async function createInvestmentRuntime(options: InvestmentRuntimeOptions)
 						if (generation === scheduledGeneration) {
 							await runScheduledCollection();
 						}
-					}, {timezone: options.timezone, name: 'clal-investments'});
+					}, {timezone: options.timezone, name: `${provider}-investments`});
 					logger.info('investment scheduler started', {schedule: config.schedule, timezone: options.timezone});
 				} else {
 					logger.error('investment schedule invalid; bank schedule remains available');

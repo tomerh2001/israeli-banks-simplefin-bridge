@@ -20,9 +20,12 @@ export type Command =
 	| 'clal-sync'
 	| 'clal-renew'
 	| 'clal-status'
+	| 'best-invest-login'
+	| 'best-invest-sync'
+	| 'best-invest-status'
 	| 'serve';
 
-export type OptionName = 'config' | 'data-dir' | 'verbose' | 'help' | 'from' | 'to' | 'force' | 'label' | 'rotate' | 'account' | 'manual-otp';
+export type OptionName = 'config' | 'data-dir' | 'verbose' | 'help' | 'from' | 'to' | 'force' | 'label' | 'rotate' | 'account' | 'manual-otp' | 'email';
 
 export type ParsedArgs = {
 	command: Command;
@@ -46,6 +49,7 @@ const OPTIONS = {
 	rotate: {type: 'boolean'},
 	account: {type: 'string', multiple: true},
 	'manual-otp': {type: 'boolean'},
+	email: {type: 'boolean'},
 } satisfies ParseArgsConfig['options'];
 
 const GLOBAL_OPTIONS: OptionName[] = ['config', 'data-dir', 'verbose', 'help'];
@@ -66,6 +70,9 @@ const COMMANDS: Record<Command, {options: OptionName[]; positional?: 'company'}>
 	'clal-sync': {options: []},
 	'clal-renew': {options: []},
 	'clal-status': {options: []},
+	'best-invest-login': {options: ['manual-otp', 'email']},
+	'best-invest-sync': {options: []},
+	'best-invest-status': {options: []},
 	serve: {options: []},
 };
 
@@ -93,6 +100,11 @@ Commands:
   clal-sync               Collect Clal investments; configured OTP recovery permits one login and retry.
   clal-renew              Renew an authenticated Clal session; never request SMS or collect data.
   clal-status             Print Clal source/session health and record counts as JSON.
+  best-invest-login [--manual-otp] [--email]
+                          Authenticate Best Invest and collect the verified policy data.
+                          --email sends the code to configured credentials.email and reads private stdin.
+  best-invest-sync        Refresh Best Invest using its saved session or configured OTP receiver.
+  best-invest-status      Print Best Invest health and record counts as JSON.
   serve                   Start the SimpleFIN server and the scheduler (same as node dist/index.js).
 
 Global options:
@@ -141,7 +153,7 @@ export function parseCommandLine(args: string[]): ParsedArgs | {help: true} {
 	}
 
 	if (rest.length > (spec.positional ? 1 : 0)) {
-		if (name.startsWith('clal-')) {
+		if (name.startsWith('clal-') || name.startsWith('best-invest-')) {
 			throw new UsageError(`Unexpected argument for "${name}"; OTP codes must not be command arguments`);
 		}
 

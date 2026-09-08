@@ -33,6 +33,7 @@ import {createInvestmentStore} from './investments/store.js';
 import {renewClalSession} from './investments/session.js';
 import {getClalSessionStatus} from './investments/router.js';
 import {automaticClalLogin, clalSessionVerifiedCallback, createClalRecoveryCollector} from './investments/recovery.js';
+import {createBestInvestCollector} from './investments/best-invest/collector.js';
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 const ANOMALY_LIMIT = 20;
@@ -441,6 +442,61 @@ function commandClalStatus(context: BridgeContext): number {
 	}
 }
 
+async function commandBestInvestSync(context: BridgeContext, args: ParsedArgs): Promise<number> {
+	const config = context.config.bestInvest;
+	if (!config?.enabled) {
+		throw new UsageError('Best Invest is disabled; configure bestInvest.enabled first');
+	}
+
+	const email = args.values.email === true;
+	const manual = args.command === 'best-invest-login' && (email || args.values['manual-otp'] === true || !config.googleMessagesOtpSocket);
+	const collect = createBestInvestCollector(manual
+		? {
+			readOtp: async signal => readOneTimeCode(signal, process.stdin, process.stderr, 'Best Invest'),
+			delivery: email ? 'Email' : 'SMS',
+		}
+		: {});
+	return withCommandSignal(async signal => {
+		const runtime = await createInvestmentRuntime({
+			config, env: context.env, secrets: context.secrets, logger: context.logger.child('best-invest'),
+			timezone: context.config.timezone, provider: 'hachshara_best_invest',
+			collect: async input => collect({...input, signal: AbortSignal.any([input.signal, signal])}),
+		});
+		try {
+			const status = await runtime.runNow();
+			print(status === 'auth_required'
+				? 'Best Invest needs verification. Run "bridge best-invest-login --manual-otp".'
+				: `Best Invest collection: ${status ?? 'unavailable'}`);
+			return status === 'ok' || status === 'skipped' ? 0 : 1;
+		} finally {
+			await runtime.close();
+		}
+	});
+}
+
+function commandBestInvestStatus(context: BridgeContext): number {
+	const config = context.config.bestInvest;
+	if (!config) {
+		print(JSON.stringify({configured: false, enabled: false}));
+		return 1;
+	}
+
+	const store = createInvestmentStore(path.join(context.env.dataDir, 'best-invest.sqlite'), 'hachshara_best_invest');
+	try {
+		const now = new Date();
+		const feed = store.getFeed(now, config.staleHours);
+		const stale = !feed.source.lastSuccessAt || now.getTime() - Date.parse(feed.source.lastSuccessAt) > config.staleHours * 3_600_000;
+		print(JSON.stringify({
+			configured: true, enabled: config.enabled, source: feed.source, stale,
+			automaticOtp: {enabled: Boolean(config.googleMessagesOtpSocket), maxAttemptsPer24Hours: 2},
+			counts: {products: feed.products.length, valuations: feed.valuations.length, tracks: feed.tracks.length},
+		}, null, 2));
+		return config.enabled && feed.source.status === 'ok' && !stale ? 0 : 1;
+	} finally {
+		store.close();
+	}
+}
+
 async function dispatch(context: BridgeContext, args: ParsedArgs): Promise<number> {
 	switch (args.command) {
 		case 'scrape': {
@@ -497,6 +553,15 @@ async function dispatch(context: BridgeContext, args: ParsedArgs): Promise<numbe
 
 		case 'clal-status': {
 			return commandClalStatus(context);
+		}
+
+		case 'best-invest-login':
+		case 'best-invest-sync': {
+			return commandBestInvestSync(context, args);
+		}
+
+		case 'best-invest-status': {
+			return commandBestInvestStatus(context);
 		}
 
 		case 'serve': {

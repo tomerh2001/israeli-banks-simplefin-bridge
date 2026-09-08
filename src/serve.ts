@@ -8,6 +8,7 @@
 import {mkdirSync} from 'node:fs';
 import path from 'node:path';
 import cronstrue from 'cronstrue';
+import {Hono} from 'hono';
 import {loadConfig, readRuntimeEnv} from './config.js';
 import {createLogger, setVerbose, type Logger} from './log.js';
 import {suppressSqliteWarning} from './quiet-warnings.js';
@@ -18,6 +19,7 @@ import {createInvestmentRuntime, type InvestmentCollector, type InvestmentRuntim
 import {collectClal} from './investments/reader.js';
 import {renewClalSession} from './investments/session.js';
 import {createClalRecoveryCollector} from './investments/recovery.js';
+import {createBestInvestCollector} from './investments/best-invest/collector.js';
 import type {CompanyId, Config, Ledger, RunRecord, RuntimeEnv, SecretsResolver} from './types.js';
 
 /** Everything a command needs to talk to the ledger and the banks. */
@@ -34,6 +36,7 @@ export type BridgeContext = {
 export type ServeOptions = {
 	logger?: Logger;
 	investmentCollector?: InvestmentCollector;
+	bestInvestCollector?: InvestmentCollector;
 	/**
 	 * Process exit hook (`code => process.exit(code)` in the entry scripts). When given,
 	 * SIGINT/SIGTERM trigger a graceful shutdown followed by exit, and ONE_SHOT mode
@@ -46,6 +49,7 @@ export type RunningBridge = {
 	context: BridgeContext;
 	scheduler: Scheduler;
 	investments?: InvestmentRuntime;
+	bestInvest?: InvestmentRuntime;
 	/** Bound listen port. */
 	port: number;
 	/** Stop the scheduler, close the server and the ledger. Idempotent. */
@@ -160,12 +164,26 @@ export async function serve(options: ServeOptions = {}): Promise<RunningBridge> 
 			collect: createClalRecoveryCollector(options.investmentCollector ?? collectClal), maintainSession: renewClalSession,
 		})
 		: undefined;
-	const server = await startServer({config, ledger, logger: logger.child('http'), investmentRouter: investments?.router});
+	const bestInvest = config.bestInvest?.enabled
+		? await createInvestmentRuntime({
+			config: config.bestInvest, env, secrets, logger: logger.child('best-invest'), timezone: config.timezone,
+			provider: 'hachshara_best_invest', collect: options.bestInvestCollector ?? createBestInvestCollector(),
+		})
+		: undefined;
+	const investmentRouter = new Hono();
+	for (const runtime of [investments, bestInvest]) {
+		if (runtime) {
+			investmentRouter.route('/', runtime.router);
+		}
+	}
+
+	const server = await startServer({config, ledger, logger: logger.child('http'), investmentRouter});
 	if (config.schedule) {
 		scheduler.start();
 	}
 
 	investments?.start();
+	bestInvest?.start();
 
 	logStartup(context, server.port);
 
@@ -175,14 +193,15 @@ export async function serve(options: ServeOptions = {}): Promise<RunningBridge> 
 			logger.info('shutting down');
 			scheduler.stop();
 			investments?.stop();
+			bestInvest?.stop();
 			await closeWithGrace(async () => server.close(), logger);
-			await investments?.close();
+			await Promise.all([investments?.close(), bestInvest?.close()]);
 			context.close();
 		})();
 		return shuttingDown;
 	};
 
-	const running: RunningBridge = {context, scheduler, investments, port: server.port, shutdown};
+	const running: RunningBridge = {context, scheduler, investments, bestInvest, port: server.port, shutdown};
 	if (options.exit) {
 		installSignalHandlers(running, options.exit);
 	}

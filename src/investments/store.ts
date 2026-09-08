@@ -8,6 +8,7 @@ import type {
 	InvestmentFeed,
 	InvestmentImportSummary,
 	InvestmentProduct,
+	InvestmentProvider,
 	InvestmentSnapshot,
 	InvestmentSourceState,
 	InvestmentStore,
@@ -17,14 +18,14 @@ const recordKinds = ['products', 'valuations', 'activities', 'tracks'] as const;
 type RecordKind = typeof recordKinds[number];
 type InvestmentRecord = InvestmentSnapshot[RecordKind][number];
 
-function initialState(): InvestmentSourceState {
+function initialState(provider: InvestmentProvider): InvestmentSourceState {
 	return {
-		provider: 'clal', status: 'never_synced', lastAttemptAt: null, lastSuccessAt: null,
+		provider, status: 'never_synced', lastAttemptAt: null, lastSuccessAt: null,
 		staleAfterHours: 168, errorCode: null, inventoryComplete: false,
 	};
 }
 
-function validateRelations(snapshot: InvestmentSnapshot): void {
+function validateRelations(snapshot: InvestmentSnapshot, provider: InvestmentProvider): void {
 	const products = new Map(snapshot.products.map(product => [product.id, product]));
 	for (const kind of recordKinds) {
 		const identifiers = snapshot[kind].map(row => row.id);
@@ -34,7 +35,7 @@ function validateRelations(snapshot: InvestmentSnapshot): void {
 	}
 
 	for (const product of snapshot.products) {
-		if (product.id !== investmentProductId(product.providerProductId)) {
+		if (product.provider !== provider || product.id !== investmentProductId(product.providerProductId, provider)) {
 			throw new Error('Investment product identity does not match its provider identity');
 		}
 
@@ -79,7 +80,7 @@ function financialContent(row: InvestmentRecord): string {
 }
 
 /** Separate database: investment writes cannot mutate bank accounts or their source freshness. */
-export function createInvestmentStore(filename: string): InvestmentStore {
+export function createInvestmentStore(filename: string, provider: InvestmentProvider = 'clal'): InvestmentStore {
 	const db = new DatabaseSync(filename);
 	db.exec('PRAGMA busy_timeout = 5000; PRAGMA foreign_keys = ON;');
 	db.exec('CREATE TABLE IF NOT EXISTS investment_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);');
@@ -110,7 +111,12 @@ export function createInvestmentStore(filename: string): InvestmentStore {
 
 	const readState = (): InvestmentSourceState => {
 		const row = db.prepare('SELECT value FROM investment_meta WHERE key = ?').get('source_state');
-		return row ? investmentSourceStateSchema.parse(JSON.parse(String(row.value))) : initialState();
+		const state = row ? investmentSourceStateSchema.parse(JSON.parse(String(row.value))) : initialState(provider);
+		if (state.provider !== provider) {
+			throw new Error('Investment database belongs to another provider');
+		}
+
+		return state;
 	};
 
 	const writeState = (state: InvestmentSourceState): void => {
@@ -221,7 +227,7 @@ export function createInvestmentStore(filename: string): InvestmentStore {
 				return {applied: false, inserted: 0, updated: 0, unchanged: 0};
 			}
 
-			validateRelations(snapshot);
+			validateRelations(snapshot, provider);
 			const summary = {applied: true, inserted: 0, updated: 0, unchanged: 0};
 			db.exec('BEGIN IMMEDIATE');
 			try {
