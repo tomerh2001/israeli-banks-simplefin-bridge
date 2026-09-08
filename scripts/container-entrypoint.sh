@@ -12,7 +12,7 @@ needs_display() {
         [ "$#" -ge 2 ] || return 1
         shift 2
         ;;
-      --config=*|--data-dir=*|--from=*|--to=*|--label=*|--account=*|--verbose|--force|--rotate) shift ;;
+      --config=*|--data-dir=*|--from=*|--to=*|--label=*|--account=*|--verbose|--force|--rotate|--manual-otp) shift ;;
       --) shift; break ;;
       -h|--help) return 1 ;;
       -*) return 1 ;;
