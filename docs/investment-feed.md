@@ -123,9 +123,11 @@ performing an initial scrape.
 
 Clal uses visually hidden Material radio and checkbox inputs. Assisted login
 selects the radio labelled `סמס` and verifies the single consent checkbox without
-toggling controls that are already checked. The offline browser regression test
-uses synthetic HTML and never contacts Clal; run it with `CLAL_BROWSER_TEST=1`
-and `PUPPETEER_EXECUTABLE_PATH` pointing to the pinned container browser.
+toggling controls that are already checked. Delivery is selected before entering
+credentials because switching delivery recreates Clal's phone field empty.
+The offline browser regression test uses synthetic HTML and never contacts Clal;
+run it with `CLAL_BROWSER_TEST=1` and `PUPPETEER_EXECUTABLE_PATH` pointing to the
+pinned container browser.
 
 ## Optional session renewal
 

@@ -33,8 +33,8 @@ describe('Clal assisted login confirmation', () => {
 			$: async () => null,
 			goto: vi.fn(async () => undefined),
 			evaluate: async () => true,
-			waitForSelector: vi.fn(async (_selector: string, options: {visible?: boolean; hidden?: boolean}) => {
-				if (options.visible) {
+			waitForSelector: vi.fn(async (selector: string, options: {visible?: boolean; hidden?: boolean}) => {
+				if (options.visible && selector === '[formcontrolname="otp"]') {
 					events.push('otp-form');
 				}
 			}),
@@ -227,6 +227,60 @@ describe.runIf(process.env.CLAL_BROWSER_TEST === '1')('Clal hidden Material cont
 			<label for="consent">Consent</label><input id="consent" type="checkbox" ${selected ? 'checked' : ''}>
 		`);
 	}
+
+	it.each([false, true])('submits credentials after delivery selection recreates the phone control (SMS initially %s)', async smsSelected => {
+		await page.setContent(`
+			<style>input[type=radio], input[type=checkbox] { position:absolute; clip:rect(0,0,0,0); width:1px; height:1px; }</style>
+			<form>
+				<input formcontrolname="tz" required>
+				<input formcontrolname="mobile" required>
+				<label for="voice">הודעה קולית</label><input id="voice" name="delivery" type="radio" ${smsSelected ? '' : 'checked'}>
+				<label for="sms">סמס</label><input id="sms" name="delivery" type="radio" ${smsSelected ? 'checked' : ''}>
+				<label for="consent">Consent</label><input id="consent" type="checkbox" checked>
+				<button type="submit">שליחה</button>
+			</form>
+		`);
+		await page.evaluate(() => {
+			document.querySelector('#sms')!.addEventListener('change', () => {
+				// Clal's sendTypeChanged replaces mobileCtrl instead of retaining its value.
+				const replacement = document.createElement('input');
+				replacement.setAttribute('formcontrolname', 'mobile');
+				replacement.required = true;
+				document.querySelector('[formcontrolname="mobile"]')!.replaceWith(replacement);
+				document.body.dataset.phoneReplaced = 'true';
+			});
+			const finishLogin = () => {
+				document.querySelector('form')!.remove();
+			};
+
+			document.querySelector('form')!.addEventListener('submit', event => {
+				event.preventDefault();
+				document.body.dataset.submittedId = document.querySelector<HTMLInputElement>('[formcontrolname="tz"]')!.value;
+				document.body.dataset.submittedPhone = document.querySelector<HTMLInputElement>('[formcontrolname="mobile"]')!.value;
+				document.querySelector('form')!.innerHTML = '<input formcontrolname="otp"><button type="button">כניסה לחשבון</button>';
+				document.querySelector('button')!.addEventListener('click', finishLogin);
+			});
+		});
+		const goto = vi.spyOn(page, 'goto').mockResolvedValue(null);
+		page.setDefaultTimeout(1000);
+		vi.mocked(browserModule.withClalBrowser).mockImplementation(async (options, work) => work(page, options.signal ?? new AbortController().signal));
+		vi.mocked(assertClalSessionAuthenticated).mockResolvedValue();
+		vi.mocked(readClalSessionRemaining).mockResolvedValue(1199);
+		try {
+			await assistedClalLogin({
+				env: readRuntimeEnv(), timeoutMinutes: 1, config: investmentConfigSchema.parse({enabled: true}),
+				secrets: {resolve: async reference => reference, resolveAll: async () => ({id: '123456789', phone: '0501234567'})},
+				readOtp: async () => '123456',
+			});
+			expect(await page.evaluate(() => ({...document.body.dataset}))).toEqual({
+				...(!smsSelected && {phoneReplaced: 'true'}), submittedId: '123456789', submittedPhone: '0501234567',
+			});
+			expect(assertClalSessionAuthenticated).toHaveBeenCalledOnce();
+		} finally {
+			goto.mockRestore();
+			page.setDefaultTimeout(30_000);
+		}
+	});
 
 	it('preserves already selected SMS and consent without toggling either', async () => {
 		await fixture(true);

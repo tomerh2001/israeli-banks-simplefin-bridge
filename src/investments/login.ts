@@ -83,9 +83,11 @@ export async function assistedClalLogin(options: ClalLoginOptions): Promise<void
 		redact(id);
 		redact(phone);
 		await page.goto(CLAL_LOGIN_URL, {waitUntil: 'domcontentloaded'});
+		await page.waitForSelector('[formcontrolname="tz"]', {visible: true});
+		// Changing delivery recreates Clal's mobile control with an empty value.
+		await configureClalLoginDelivery(page);
 		await page.locator('[formcontrolname="tz"]').fill(id);
 		await page.locator('[formcontrolname="mobile"]').fill(phone);
-		await configureClalLoginDelivery(page);
 		let otpRequest: ClalOtpRequest | undefined;
 		try {
 			otpRequest = await options.otpSource?.prepare(signal);
