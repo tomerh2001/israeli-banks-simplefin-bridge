@@ -181,6 +181,57 @@
       },
       "description": "One entry per bank/card company, keyed by the israeli-bank-scrapers company id."
     },
+    "investments": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "default": false,
+          "type": "boolean",
+          "description": "Enable the investment feed and independent collector. Default false."
+        },
+        "readToken": {
+          "default": "",
+          "type": "string",
+          "description": "Dedicated investment read bearer token or op:// reference. Missing or unavailable token disables only the investment feed."
+        },
+        "credentials": {
+          "default": {},
+          "type": "object",
+          "properties": {
+            "id": {
+              "default": "",
+              "type": "string"
+            },
+            "phone": {
+              "default": "",
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "description": "Clal Israeli ID and phone, preferably op:// references resolved by 1Password Connect."
+        },
+        "schedule": {
+          "default": "0 7 * * 1",
+          "type": "string",
+          "description": "Independent collection cron in the bridge timezone. Default 0 7 * * 1 (weekly Monday at 07:00)."
+        },
+        "staleHours": {
+          "default": 192,
+          "type": "integer",
+          "minimum": 1,
+          "description": "Age after which investment data is stale. Default 192 hours."
+        },
+        "timeoutMinutes": {
+          "default": 10,
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 30,
+          "description": "Maximum time allowed for one collection. Default 10 minutes."
+        }
+      },
+      "additionalProperties": false,
+      "description": "Optional dedicated Clal investment collection and feed, separate from SimpleFIN bank accounts."
+    },
     "server": {
       "default": {},
       "type": "object",

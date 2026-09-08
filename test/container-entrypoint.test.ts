@@ -33,6 +33,8 @@ describe('container entrypoint dispatch', () => {
 
 	it.each([
 		['serve'],
+		['clal-login'],
+		['--config', '/config with spaces.json', 'clal-sync'],
 		['scrape', 'hapoalim', '--config', '/config with spaces.json'],
 		['--config', '/config with spaces.json', '--verbose', 'scrape', 'hapoalim'],
 		['--data-dir', '/data with spaces', '--config=/config.json', 'serve'],
@@ -51,6 +53,7 @@ describe('container entrypoint dispatch', () => {
 		['login', 'hapoalim'],
 		['--config', '/config with spaces.json', '--verbose', 'login', 'hapoalim'],
 		['status'],
+		['clal-status'],
 		['--help'],
 	])('runs assisted login and metadata commands without a display wrapper: %j', (...args) => {
 		expect(parseCommandLine(args)).toBeDefined();

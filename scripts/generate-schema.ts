@@ -40,6 +40,13 @@ const descriptions: Record<string, string> = {
 	overlapDays: 'Days re-scraped on every run to catch late postings (window starts at lastSuccess - overlapDays). Default 30.',
 	maxLoginAttemptsPerDay: 'Max login attempts per company per calendar day (bank lockout guard). Default 2.',
 	companies: 'One entry per bank/card company, keyed by the israeli-bank-scrapers company id.',
+	investments: 'Optional dedicated Clal investment collection and feed, separate from SimpleFIN bank accounts.',
+	'investments.enabled': 'Enable the investment feed and independent collector. Default false.',
+	'investments.readToken': 'Dedicated investment read bearer token or op:// reference. Missing or unavailable token disables only the investment feed.',
+	'investments.credentials': 'Clal Israeli ID and phone, preferably op:// references resolved by 1Password Connect.',
+	'investments.schedule': 'Independent collection cron in the bridge timezone. Default 0 7 * * 1 (weekly Monday at 07:00).',
+	'investments.staleHours': 'Age after which investment data is stale. Default 192 hours.',
+	'investments.timeoutMinutes': 'Maximum time allowed for one collection. Default 10 minutes.',
 	'companies.enabled': 'Disabled companies are never scraped and never served. Default true.',
 	'companies.label': 'Human label used for SimpleFIN connection/account names and logs.',
 	'companies.kind': 'Default kind for every account of this company (checking, credit_card, savings, investment).',
@@ -67,10 +74,12 @@ function describe(schema: JsonObject): void {
 	const properties = schema.properties as JsonObject;
 	const companies = (properties.companies as JsonObject).additionalProperties as JsonObject;
 	const server = properties.server as JsonObject;
+	const investments = properties.investments as JsonObject;
 	const targets: Record<string, JsonObject> = {
 		'': properties,
 		'companies.': companies.properties as JsonObject,
 		'server.': server.properties as JsonObject,
+		'investments.': investments.properties as JsonObject,
 	};
 	for (const [key, description] of Object.entries(descriptions)) {
 		const dot = key.lastIndexOf('.');

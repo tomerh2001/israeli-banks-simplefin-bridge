@@ -14,6 +14,8 @@ import {suppressSqliteWarning} from './quiet-warnings.js';
 import {createScheduler, type Scheduler} from './scrape/index.js';
 import {createSecretsResolver} from './secrets/onepassword.js';
 import {startServer} from './simplefin/server.js';
+import {createInvestmentRuntime, type InvestmentCollector, type InvestmentRuntime} from './investments/runtime.js';
+import {collectClal} from './investments/reader.js';
 import type {CompanyId, Config, Ledger, RunRecord, RuntimeEnv, SecretsResolver} from './types.js';
 
 /** Everything a command needs to talk to the ledger and the banks. */
@@ -29,6 +31,7 @@ export type BridgeContext = {
 
 export type ServeOptions = {
 	logger?: Logger;
+	investmentCollector?: InvestmentCollector;
 	/**
 	 * Process exit hook (`code => process.exit(code)` in the entry scripts). When given,
 	 * SIGINT/SIGTERM trigger a graceful shutdown followed by exit, and ONE_SHOT mode
@@ -40,6 +43,7 @@ export type ServeOptions = {
 export type RunningBridge = {
 	context: BridgeContext;
 	scheduler: Scheduler;
+	investments?: InvestmentRuntime;
 	/** Bound listen port. */
 	port: number;
 	/** Stop the scheduler, close the server and the ledger. Idempotent. */
@@ -148,10 +152,15 @@ export async function serve(options: ServeOptions = {}): Promise<RunningBridge> 
 	const context = await openContext(logger);
 	const {config, env, ledger, secrets} = context;
 	const scheduler = createScheduler({config, env, ledger, secrets, logger: logger.child('scrape')});
-	const server = await startServer({config, ledger, logger: logger.child('http')});
+	const investments = config.investments?.enabled
+		? await createInvestmentRuntime({config: config.investments, env, secrets, logger: logger.child('investments'), timezone: config.timezone, collect: options.investmentCollector ?? collectClal})
+		: undefined;
+	const server = await startServer({config, ledger, logger: logger.child('http'), investmentRouter: investments?.router});
 	if (config.schedule) {
 		scheduler.start();
 	}
+
+	investments?.start();
 
 	logStartup(context, server.port);
 
@@ -160,13 +169,15 @@ export async function serve(options: ServeOptions = {}): Promise<RunningBridge> 
 		shuttingDown ??= (async () => {
 			logger.info('shutting down');
 			scheduler.stop();
+			investments?.stop();
 			await closeWithGrace(async () => server.close(), logger);
+			await investments?.close();
 			context.close();
 		})();
 		return shuttingDown;
 	};
 
-	const running: RunningBridge = {context, scheduler, port: server.port, shutdown};
+	const running: RunningBridge = {context, scheduler, investments, port: server.port, shutdown};
 	if (options.exit) {
 		installSignalHandlers(running, options.exit);
 	}

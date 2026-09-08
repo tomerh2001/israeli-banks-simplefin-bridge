@@ -20,13 +20,14 @@ needs_display() {
     esac
   done
   case "${1:-}" in
-    serve|scrape) return 0 ;;
+    serve|scrape|clal-login|clal-sync) return 0 ;;
     *) return 1 ;;
   esac
 }
 
 # Scheduled and manual scrapes need a display when a company uses showBrowser.
-# Assisted login manages its own display; metadata commands need none.
+# Bank assisted login manages its own display; Clal uses hidden terminal OTP
+# entry and this display wrapper. Metadata commands need none.
 if needs_display "$@"; then
   exec xvfb-run --auto-servernum --server-num=98 \
     --server-args='-screen 0 1280x900x24 -nolisten tcp' "$@"

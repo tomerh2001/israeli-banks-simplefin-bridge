@@ -28,6 +28,8 @@ export type AppOptions = {
 	logger: Logger;
 	/** Clock override for tests. */
 	now?: () => Date;
+	/** Separately authenticated investment routes, absent unless explicitly enabled. */
+	investmentRouter?: Hono;
 };
 
 type Variables = {
@@ -133,6 +135,9 @@ export function createApp(options: AppOptions): BridgeApp {
 		logger.error('unhandled error', {method: c.req.method, path: loggablePath(c.req.path), message: error.message});
 		return c.json({error: 'internal_error'}, 500);
 	});
+	if (options.investmentRouter) {
+		app.route('/', options.investmentRouter);
+	}
 
 	app.post('/simplefin/claim/:claimId', c => {
 		const result = handleClaim(ledger, config, c.req.param('claimId'), now(), remoteIp(c), logger);

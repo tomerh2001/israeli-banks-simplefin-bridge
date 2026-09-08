@@ -3,6 +3,7 @@
  */
 
 import type {AddressInfo} from 'node:net';
+import type {Hono} from 'hono';
 import {serve} from '@hono/node-server';
 import type {Logger} from '../log.js';
 import type {Config, Ledger} from '../types.js';
@@ -13,6 +14,7 @@ export type ServerOptions = {
 	config: Config;
 	ledger: Ledger;
 	logger: Logger;
+	investmentRouter?: Hono;
 };
 
 export type RunningServer = {

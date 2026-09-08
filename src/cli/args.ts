@@ -16,6 +16,9 @@ export type Command =
 	| 'audit'
 	| 'export'
 	| 'health'
+	| 'clal-login'
+	| 'clal-sync'
+	| 'clal-status'
 	| 'serve';
 
 export type OptionName = 'config' | 'data-dir' | 'verbose' | 'help' | 'from' | 'to' | 'force' | 'label' | 'rotate' | 'account';
@@ -57,6 +60,9 @@ const COMMANDS: Record<Command, {options: OptionName[]; positional?: 'company'}>
 	audit: {options: []},
 	export: {options: ['account', 'from', 'to']},
 	health: {options: []},
+	'clal-login': {options: []},
+	'clal-sync': {options: []},
+	'clal-status': {options: []},
 	serve: {options: []},
 };
 
@@ -78,6 +84,9 @@ Commands:
   export [--account <id>]... [--from YYYY-MM-DD] [--to YYYY-MM-DD]
                           Securo-import CSV to stdout (from inclusive, to exclusive).
   health                  Print the health report as JSON; exit 0 when ok, else 1.
+  clal-login              Request Clal SMS authentication; enter the code privately on stdin.
+  clal-sync               Collect Clal investments using the saved session; never request SMS.
+  clal-status             Print only Clal source health and record counts as JSON.
   serve                   Start the SimpleFIN server and the scheduler (same as node dist/index.js).
 
 Global options:
@@ -126,6 +135,10 @@ export function parseCommandLine(args: string[]): ParsedArgs | {help: true} {
 	}
 
 	if (rest.length > (spec.positional ? 1 : 0)) {
+		if (name.startsWith('clal-')) {
+			throw new UsageError(`Unexpected argument for "${name}"; OTP codes are accepted only on stdin`);
+		}
+
 		throw new UsageError(`Unexpected argument "${rest.at(-1)}" for "${name}"`);
 	}
 
