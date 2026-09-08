@@ -30,6 +30,8 @@ import {assistedClalLogin} from './investments/login.js';
 import {collectClal} from './investments/reader.js';
 import {createInvestmentRuntime} from './investments/runtime.js';
 import {createInvestmentStore} from './investments/store.js';
+import {renewClalSession} from './investments/session.js';
+import {getClalSessionStatus} from './investments/router.js';
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 const ANOMALY_LIMIT = 20;
@@ -351,12 +353,47 @@ async function withCommandSignal(work: (signal: AbortSignal) => Promise<number>)
 async function commandClalLogin(context: BridgeContext): Promise<number> {
 	const config = requireClalConfig(context);
 	return withCommandSignal(async signal => {
-		await assistedClalLogin({
-			config, env: {...context.env, showBrowser: true}, secrets: context.secrets,
-			timeoutMinutes: config.timeoutMinutes, signal, readOtp: readOneTimeCode,
+		const store = createInvestmentStore(path.join(context.env.dataDir, 'investments.sqlite'));
+		try {
+			await assistedClalLogin({
+				config, env: {...context.env, showBrowser: true}, secrets: context.secrets,
+				timeoutMinutes: config.timeoutMinutes, signal, readOtp: readOneTimeCode,
+				onSessionVerified(remainingSeconds) {
+					if (signal.aborted) {
+						return;
+					}
+
+					const now = new Date();
+					store.setSessionState({
+						status: 'active', lastCheckedAt: now.toISOString(),
+						lastRenewedAt: store.getSessionState().lastRenewedAt,
+						expiresAt: new Date(now.getTime() + (remainingSeconds * 1000)).toISOString(), errorCode: null,
+					});
+				},
+			});
+			print('Clal login completed. Run "bridge clal-sync" to refresh investments.');
+			return 0;
+		} finally {
+			store.close();
+		}
+	});
+}
+
+async function commandClalRenew(context: BridgeContext): Promise<number> {
+	const config = requireClalConfig(context);
+	return withCommandSignal(async signal => {
+		const runtime = await createInvestmentRuntime({
+			config, env: context.env, secrets: context.secrets, logger: context.logger.child('investments'),
+			timezone: context.config.timezone,
+			maintainSession: async options => renewClalSession({...options, signal: AbortSignal.any([options.signal ?? signal, signal])}),
 		});
-		print('Clal login completed. Run "bridge clal-sync" to refresh investments.');
-		return 0;
+		try {
+			const state = await runtime.maintainSessionNow();
+			print(`Clal session: ${state?.status ?? 'skipped'}`);
+			return state?.status === 'active' ? 0 : 1;
+		} finally {
+			await runtime.close();
+		}
 	});
 }
 
@@ -376,7 +413,7 @@ async function commandClalSync(context: BridgeContext): Promise<number> {
 				print(`Clal collection: ${status ?? 'unavailable'}`);
 			}
 
-			return status === 'ok' ? 0 : 1;
+			return status === 'ok' || status === 'skipped' ? 0 : 1;
 		} finally {
 			await runtime.close();
 		}
@@ -398,6 +435,7 @@ function commandClalStatus(context: BridgeContext): number {
 		const stale = lastSuccess === undefined || now.getTime() - lastSuccess > config.staleHours * 3_600_000;
 		print(JSON.stringify({
 			configured: true, enabled: config.enabled, source: feed.source, stale,
+			session: getClalSessionStatus(store.getSessionState(), now, config.sessionKeepAliveMinutes),
 			counts: {products: feed.products.length, valuations: feed.valuations.length, activities: feed.activities.length, tracks: feed.tracks.length},
 		}, null, 2));
 		return config.enabled && feed.source.status === 'ok' && !stale ? 0 : 1;
@@ -454,6 +492,10 @@ async function dispatch(context: BridgeContext, args: ParsedArgs): Promise<numbe
 
 		case 'clal-sync': {
 			return commandClalSync(context);
+		}
+
+		case 'clal-renew': {
+			return commandClalRenew(context);
 		}
 
 		case 'clal-status': {

@@ -177,7 +177,7 @@ describe('bridge CLI (child process)', () => {
 		expect(result.stdout).not.toContain('hapoalim');
 	});
 
-	it.each(['clal-login', 'clal-sync'])('%s refuses missing investment configuration before any provider action', async command => {
+	it.each(['clal-login', 'clal-sync', 'clal-renew'])('%s refuses missing investment configuration before any provider action', async command => {
 		const result = await runCli([command]);
 		expect(result.code).toBe(2);
 		expect(result.stderr).toContain('Clal investments are not configured');
@@ -200,10 +200,17 @@ describe('bridge CLI (child process)', () => {
 			valuations: [{id: 'clal:CLI-FIXTURE:valuation:undated', productId: 'clal:CLI-FIXTURE', asOf: null, observedAt: '2026-09-08T06:00:00.000Z', amount: '654321.09', currency: 'ILS'}],
 			activities: [], tracks: [],
 		});
+		store.setSessionState({
+			status: 'active', lastCheckedAt: '2000-01-01T00:00:00.000Z', lastRenewedAt: '2000-01-01T00:00:00.000Z',
+			expiresAt: '2000-01-01T00:20:00.000Z', errorCode: null,
+		});
 		store.close();
 		const result = await runCli(['--config', target, 'clal-status']);
 		expect(result.code).toBe(1);
-		expect(JSON.parse(result.stdout)).toMatchObject({configured: true, enabled: false, counts: {products: 1, valuations: 1, activities: 0, tracks: 0}});
+		expect(JSON.parse(result.stdout)).toMatchObject({
+			configured: true, enabled: false, counts: {products: 1, valuations: 1, activities: 0, tracks: 0},
+			session: {expired: true, verifiedActive: false},
+		});
 		for (const privateValue of ['654321.09', 'CLI-FIXTURE', 'Private fixture pension', 'private-cli-fixture-token', 'private-fixture-id', 'private-fixture-phone']) {
 			expect(result.stdout + result.stderr).not.toContain(privateValue);
 		}

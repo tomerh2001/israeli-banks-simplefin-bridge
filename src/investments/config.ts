@@ -8,6 +8,8 @@ export const investmentConfigSchema = z.strictObject({
 	schedule: z.string().default('0 7 * * 1'),
 	staleHours: z.number().int().min(1).default(192),
 	timeoutMinutes: z.number().int().min(1).max(30).default(10),
+	/** Opt in to session-only renewal; disabled by default and never requests an SMS. */
+	sessionKeepAliveMinutes: z.number().int().min(0).max(10).default(0),
 });
 
 export type InvestmentConfig = z.infer<typeof investmentConfigSchema>;

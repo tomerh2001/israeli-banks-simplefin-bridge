@@ -7,12 +7,15 @@ import type {SecretsResolver} from '../types.js';
 import {redact} from '../log.js';
 import type {InvestmentConfig} from './config.js';
 import {CLAL_LOGIN_URL, CLAL_PORTFOLIO_URL, ClalCollectionError, isClalLogin, withClalBrowser, type ClalBrowserOptions} from './browser.js';
+import {assertClalSessionAuthenticated, readClalSessionRemaining} from './session.js';
 
 export type ClalLoginOptions = ClalBrowserOptions & {
 	config: InvestmentConfig;
 	secrets: SecretsResolver;
 	/** Called only after the portal confirms that it is waiting for an SMS code. Never persist the code. */
 	readOtp(signal: AbortSignal): Promise<string>;
+	/** Runs while the profile is owned, only after protected access and lifetime are verified. */
+	onSessionVerified?(remainingSeconds: number): void;
 };
 
 /** Material inputs are visually hidden; preserve selected values instead of toggling them. */
@@ -41,9 +44,19 @@ export async function configureClalLoginDelivery(page: Page): Promise<void> {
 /** Explicit operator command only: scheduled collection must never call this function. */
 export async function assistedClalLogin(options: ClalLoginOptions): Promise<void> {
 	await withClalBrowser(options, async (page, signal) => {
-		await page.goto(CLAL_PORTFOLIO_URL, {waitUntil: 'networkidle2'});
+		await page.goto(CLAL_PORTFOLIO_URL, {waitUntil: 'domcontentloaded'});
 		if (!await isClalLogin(page)) {
-			return;
+			try {
+				await assertClalSessionAuthenticated(page);
+				const remainingSeconds = await readClalSessionRemaining(page);
+				signal.throwIfAborted();
+				options.onSessionVerified?.(remainingSeconds);
+				return;
+			} catch (error) {
+				if (!(error instanceof ClalCollectionError) || error.code !== 'OTP_REQUIRED') {
+					throw error;
+				}
+			}
 		}
 
 		let credentials: Record<string, string>;
@@ -79,9 +92,14 @@ export async function assistedClalLogin(options: ClalLoginOptions): Promise<void
 
 		await page.locator('::-p-aria(כניסה לחשבון)').click();
 		await page.waitForSelector('[formcontrolname="otp"]', {hidden: true});
-		await page.goto(CLAL_PORTFOLIO_URL, {waitUntil: 'networkidle2'});
+		await page.goto(CLAL_PORTFOLIO_URL, {waitUntil: 'domcontentloaded'});
 		if (await isClalLogin(page)) {
 			throw new ClalCollectionError('OTP_REQUIRED');
 		}
+
+		await assertClalSessionAuthenticated(page);
+		const remainingSeconds = await readClalSessionRemaining(page);
+		signal.throwIfAborted();
+		options.onSessionVerified?.(remainingSeconds);
 	});
 }
