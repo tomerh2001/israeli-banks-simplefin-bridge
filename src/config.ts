@@ -1,6 +1,7 @@
 import {readFile} from 'node:fs/promises';
 import path from 'node:path';
 import {z} from 'zod';
+import {investmentConfigSchema} from './investments/config.js';
 import type {Config, RuntimeEnv} from './types.js';
 
 const accountKind = z.enum(['checking', 'credit_card', 'savings', 'investment']);
@@ -38,6 +39,7 @@ export const configSchema = z.object({
 	overlapDays: z.number().int().min(1).max(365).default(30),
 	maxLoginAttemptsPerDay: z.number().int().min(1).max(20).default(2),
 	companies: z.record(z.string(), companySchema),
+	investments: investmentConfigSchema.optional(),
 	// `prefault` feeds the empty object through the schema so every nested default applies.
 	server: serverSchema.prefault({}),
 });

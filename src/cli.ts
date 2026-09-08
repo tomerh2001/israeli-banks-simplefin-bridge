@@ -8,7 +8,9 @@
  */
 
 import process from 'node:process';
+import path from 'node:path';
 import {parseCommandLine, table, USAGE, UsageError, type ParsedArgs} from './cli/args.js';
+import {readOneTimeCode} from './cli/otp.js';
 import {exportCsv} from './export/csv.js';
 import {buildHealthReport} from './health.js';
 import {createLogger, type Logger} from './log.js';
@@ -23,6 +25,11 @@ import {
 	type BridgeContext,
 } from './serve.js';
 import type {CompanyId, Config, IsoDate, RunRecord} from './types.js';
+import type {InvestmentConfig} from './investments/config.js';
+import {assistedClalLogin} from './investments/login.js';
+import {collectClal} from './investments/reader.js';
+import {createInvestmentRuntime} from './investments/runtime.js';
+import {createInvestmentStore} from './investments/store.js';
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 const ANOMALY_LIMIT = 20;
@@ -297,6 +304,108 @@ function commandHealth(context: BridgeContext): number {
 	return report.ok ? 0 : 1;
 }
 
+function requireClalConfig(context: BridgeContext): InvestmentConfig {
+	const config = context.config.investments;
+	if (!config) {
+		throw new UsageError('Clal investments are not configured; add config.investments first');
+	}
+
+	if (!config.enabled) {
+		throw new UsageError('Clal investments are disabled; set config.investments.enabled to true');
+	}
+
+	return config;
+}
+
+/** Let collectors release the profile and restore terminal input before exiting. */
+async function withCommandSignal(work: (signal: AbortSignal) => Promise<number>): Promise<number> {
+	const controller = new AbortController();
+	let signalExit: number | undefined;
+	const interrupt = (): void => {
+		signalExit = 130;
+		controller.abort();
+	};
+
+	const terminate = (): void => {
+		signalExit = 143;
+		controller.abort();
+	};
+
+	process.on('SIGINT', interrupt);
+	process.on('SIGTERM', terminate);
+	try {
+		const result = await work(controller.signal);
+		return signalExit ?? result;
+	} catch (error) {
+		if (signalExit !== undefined) {
+			return signalExit;
+		}
+
+		throw error;
+	} finally {
+		process.off('SIGINT', interrupt);
+		process.off('SIGTERM', terminate);
+	}
+}
+
+async function commandClalLogin(context: BridgeContext): Promise<number> {
+	const config = requireClalConfig(context);
+	return withCommandSignal(async signal => {
+		await assistedClalLogin({
+			config, env: {...context.env, showBrowser: true}, secrets: context.secrets,
+			timeoutMinutes: config.timeoutMinutes, signal, readOtp: readOneTimeCode,
+		});
+		print('Clal login completed. Run "bridge clal-sync" to refresh investments.');
+		return 0;
+	});
+}
+
+async function commandClalSync(context: BridgeContext): Promise<number> {
+	const config = requireClalConfig(context);
+	return withCommandSignal(async signal => {
+		const runtime = await createInvestmentRuntime({
+			config, env: context.env, secrets: context.secrets, logger: context.logger.child('investments'),
+			timezone: context.config.timezone,
+			collect: async input => collectClal({...input, signal: AbortSignal.any([input.signal, signal])}),
+		});
+		try {
+			const status = await runtime.runNow();
+			if (status === 'auth_required') {
+				print('Clal needs SMS approval. Run "bridge clal-login", then "bridge clal-sync".');
+			} else {
+				print(`Clal collection: ${status ?? 'unavailable'}`);
+			}
+
+			return status === 'ok' ? 0 : 1;
+		} finally {
+			await runtime.close();
+		}
+	});
+}
+
+function commandClalStatus(context: BridgeContext): number {
+	const config = context.config.investments;
+	if (!config) {
+		print(JSON.stringify({configured: false, enabled: false}));
+		return 1;
+	}
+
+	const store = createInvestmentStore(path.join(context.env.dataDir, 'investments.sqlite'));
+	try {
+		const now = new Date();
+		const feed = store.getFeed(now, config.staleHours);
+		const lastSuccess = feed.source.lastSuccessAt ? Date.parse(feed.source.lastSuccessAt) : undefined;
+		const stale = lastSuccess === undefined || now.getTime() - lastSuccess > config.staleHours * 3_600_000;
+		print(JSON.stringify({
+			configured: true, enabled: config.enabled, source: feed.source, stale,
+			counts: {products: feed.products.length, valuations: feed.valuations.length, activities: feed.activities.length, tracks: feed.tracks.length},
+		}, null, 2));
+		return config.enabled && feed.source.status === 'ok' && !stale ? 0 : 1;
+	} finally {
+		store.close();
+	}
+}
+
 async function dispatch(context: BridgeContext, args: ParsedArgs): Promise<number> {
 	switch (args.command) {
 		case 'scrape': {
@@ -337,6 +446,18 @@ async function dispatch(context: BridgeContext, args: ParsedArgs): Promise<numbe
 
 		case 'health': {
 			return commandHealth(context);
+		}
+
+		case 'clal-login': {
+			return commandClalLogin(context);
+		}
+
+		case 'clal-sync': {
+			return commandClalSync(context);
+		}
+
+		case 'clal-status': {
+			return commandClalStatus(context);
 		}
 
 		case 'serve': {

@@ -6,6 +6,7 @@
  */
 
 import type {CompanyTypes} from 'israeli-bank-scrapers';
+import type {InvestmentConfig} from './investments/config.js';
 
 export type CompanyId = `${CompanyTypes}`;
 
@@ -90,6 +91,8 @@ export type Config = {
 	/** Max login attempts per company per calendar day (bank lockout guard). Default 2. */
 	maxLoginAttemptsPerDay: number;
 	companies: Partial<Record<CompanyId, CompanyConfig>>;
+	/** Dedicated investment collection/feed; never exported as SimpleFIN accounts. */
+	investments?: InvestmentConfig;
 	server: ServerConfig;
 };
 

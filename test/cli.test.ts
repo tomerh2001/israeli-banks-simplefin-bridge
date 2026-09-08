@@ -15,12 +15,13 @@ import {afterAll, beforeAll, describe, expect, it, vi} from 'vitest';
 import {parseCommandLine, table} from '../src/cli/args.js';
 import {serve} from '../src/serve.js';
 import type {HealthReport} from '../src/types.js';
+import {createInvestmentStore} from '../src/investments/store.js';
 import {silentLogger} from './helpers/seed.js';
 
 const repoRoot = path.resolve(import.meta.dirname, '..');
 const tsx = path.join(repoRoot, 'node_modules', 'tsx', 'dist', 'cli.mjs');
 const cliSource = path.join(repoRoot, 'src', 'cli.ts');
-const COMMANDS = ['scrape', 'status', 'mint-token', 'revoke', 'login', 'unpark', 'reset-profile', 'audit', 'export', 'health', 'serve'];
+const COMMANDS = ['scrape', 'status', 'mint-token', 'revoke', 'login', 'unpark', 'reset-profile', 'audit', 'export', 'health', 'serve', 'clal-login', 'clal-sync', 'clal-status'];
 
 type CliResult = {code: number; stdout: string; stderr: string};
 
@@ -95,6 +96,9 @@ describe('argument parsing', () => {
 		expect(() => parseCommandLine(['status', '--force'])).toThrow(/not valid for "status"/);
 		expect(() => parseCommandLine(['status', 'extra'])).toThrow(/Unexpected argument/);
 		expect(() => parseCommandLine(['health', '--bogus'])).toThrow(/bogus/);
+		expect(() => parseCommandLine(['clal-login', '123456'])).toThrow(/Unexpected argument/);
+		expect(() => parseCommandLine(['clal-login', '--otp', '123456'])).toThrow(/otp/);
+		expect(() => parseCommandLine(['clal-sync', '--force'])).toThrow(/not valid/);
 	});
 
 	it('renders aligned tables', () => {
@@ -164,6 +168,49 @@ describe('bridge CLI (child process)', () => {
 		const result = await runCli(['scrape', 'leumi']);
 		expect(result.code).toBe(2);
 		expect(result.stderr).toContain('not in the config');
+	});
+
+	it('Clal status reports missing configuration without exposing bank records', async () => {
+		const result = await runCli(['clal-status']);
+		expect(result.code).toBe(1);
+		expect(JSON.parse(result.stdout)).toEqual({configured: false, enabled: false});
+		expect(result.stdout).not.toContain('hapoalim');
+	});
+
+	it.each(['clal-login', 'clal-sync'])('%s refuses missing investment configuration before any provider action', async command => {
+		const result = await runCli([command]);
+		expect(result.code).toBe(2);
+		expect(result.stderr).toContain('Clal investments are not configured');
+	});
+
+	it('Clal status prints counts and health but no stored balances, product identity, or credentials', async () => {
+		const target = path.join(dataDir, 'clal-config.json');
+		writeConfig(target, {investments: {
+			enabled: false, readToken: 'private-cli-fixture-token', credentials: {id: 'private-fixture-id', phone: 'private-fixture-phone'},
+		}});
+		const store = createInvestmentStore(path.join(dataDir, 'investments.sqlite'));
+		store.applySnapshot({
+			observedAt: '2026-09-08T06:00:00.000Z', complete: true, inventoryComplete: true,
+			products: [{
+				id: 'clal:CLI-FIXTURE', provider: 'clal', providerProductId: 'CLI-FIXTURE', kind: 'pension', name: 'Private fixture pension', currency: 'ILS',
+				currentValuationId: 'clal:CLI-FIXTURE:valuation:undated',
+				liquidity: {status: 'restricted', availableFrom: null, availableAmount: null},
+				coverage: {valuations: 'partial', activities: 'unavailable', tracks: 'unavailable'}, forecast: null,
+			}],
+			valuations: [{id: 'clal:CLI-FIXTURE:valuation:undated', productId: 'clal:CLI-FIXTURE', asOf: null, observedAt: '2026-09-08T06:00:00.000Z', amount: '654321.09', currency: 'ILS'}],
+			activities: [], tracks: [],
+		});
+		store.close();
+		const result = await runCli(['--config', target, 'clal-status']);
+		expect(result.code).toBe(1);
+		expect(JSON.parse(result.stdout)).toMatchObject({configured: true, enabled: false, counts: {products: 1, valuations: 1, activities: 0, tracks: 0}});
+		for (const privateValue of ['654321.09', 'CLI-FIXTURE', 'Private fixture pension', 'private-cli-fixture-token', 'private-fixture-id', 'private-fixture-phone']) {
+			expect(result.stdout + result.stderr).not.toContain(privateValue);
+		}
+
+		const disabled = await runCli(['--config', target, 'clal-sync']);
+		expect(disabled.code).toBe(2);
+		expect(disabled.stderr).toContain('Clal investments are disabled');
 	});
 });
 
