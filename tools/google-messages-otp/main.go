@@ -47,6 +47,7 @@ func run(args []string) error {
 	expectedAccount := flags.String("expected-account", "", "account to verify before pairing")
 	socketPath := flags.String("socket", "", "private Unix socket; serving only")
 	sendersPath := flags.String("senders-file", "", "private JSON array of exact Clal sender addresses")
+	bestInvestSendersPath := flags.String("best-invest-senders-file", "", "optional private JSON array of verified Best Invest sender addresses")
 	if flags.Parse(args[1:]) != nil || flags.NArg() != 0 {
 		return errors.New("invalid arguments")
 	}
@@ -78,7 +79,7 @@ func run(args []string) error {
 	if *socketPath == "" || *sendersPath == "" || *cookiesPath != "" {
 		return errors.New("invalid receiver configuration")
 	}
-	return serveReceiver(ctx, *sessionPath, *socketPath, *sendersPath)
+	return serveReceiver(ctx, *sessionPath, *socketPath, *sendersPath, *bestInvestSendersPath)
 }
 
 func checkHealth(socketPath string) error {
@@ -236,8 +237,8 @@ func (r *receiver) handle(raw any) {
 	}
 }
 
-func candidate(evt *libgm.WrappedMessage) (string, time.Time, bool) {
-	if evt == nil || evt.Message == nil || evt.IsOld || evt.GetTimestamp() <= 0 || evt.GetType() != 1 {
+func candidate(evt *libgm.WrappedMessage, parseCode func(string) string) (string, time.Time, bool) {
+	if parseCode == nil || evt == nil || evt.Message == nil || evt.IsOld || evt.GetTimestamp() <= 0 || evt.GetType() != 1 {
 		return "", time.Time{}, false
 	}
 	switch evt.GetMessageStatus().GetStatus() {
@@ -255,24 +256,28 @@ func candidate(evt *libgm.WrappedMessage) (string, time.Time, bool) {
 			return "", time.Time{}, false
 		}
 	}
-	code := clalCode(text.String())
+	code := parseCode(text.String())
 	return code, time.UnixMicro(evt.GetTimestamp()), code != "" && evt.GetMessageID() != ""
 }
 
 func (r *receiver) message(evt *libgm.WrappedMessage) {
-	code, at, ok := candidate(evt)
+	provider, parseCode, active := r.broker.candidateRule()
+	if !active {
+		return
+	}
+	code, at, ok := candidate(evt, parseCode)
 	if !ok {
 		return
 	}
 	// A sender directly supplied by the event needs no conversation lookup.
 	if sender := evt.GetSenderParticipant(); sender != nil && sender.GetID().GetNumber() != "" {
 		if !sender.GetIsMe() && sender.GetID().GetParticipantID() == evt.GetParticipantID() {
-			r.broker.accept(evt.GetMessageID(), sender.GetID().GetNumber(), code, at)
+			r.broker.accept(provider, evt.GetMessageID(), sender.GetID().GetNumber(), code, at)
 		}
 		return
 	}
 	// Resolve only a current exact-template candidate, not arbitrary inbox data.
-	if !r.broker.eligible(evt.GetMessageID(), at) {
+	if !r.broker.eligible(provider, evt.GetMessageID(), at) {
 		return
 	}
 	select {
@@ -292,14 +297,14 @@ func (r *receiver) message(evt *libgm.WrappedMessage) {
 		}
 		for _, sender := range conversation.GetParticipants() {
 			if sender.GetID().GetParticipantID() == participantID && !sender.GetIsMe() {
-				r.broker.accept(id, sender.GetID().GetNumber(), code, at)
+				r.broker.accept(provider, id, sender.GetID().GetNumber(), code, at)
 				return
 			}
 		}
 	}()
 }
 
-func serveReceiver(ctx context.Context, sessionPath, socketPath, sendersPath string) error {
+func serveReceiver(ctx context.Context, sessionPath, socketPath, sendersPath, bestInvestSendersPath string) error {
 	var auth libgm.AuthData
 	if err := readPrivateJSON(sessionPath, &auth); err != nil {
 		return err
@@ -314,6 +319,15 @@ func serveReceiver(ctx context.Context, sessionPath, socketPath, sendersPath str
 	b, err := newBroker(senders, sessionPath+".consumed.json")
 	if err != nil {
 		return err
+	}
+	if bestInvestSendersPath != "" {
+		var bestInvestSenders []string
+		if err := readPrivateJSON(bestInvestSendersPath, &bestInvestSenders); err != nil {
+			return err
+		}
+		if err := b.configureProvider(bestInvestProvider, bestInvestSenders, bestInvestMatcher()); err != nil {
+			return err
+		}
 	}
 	cli := libgm.NewClient(&auth, nil, zerolog.Nop())
 	cli.SetPingInterval(20 * time.Minute)

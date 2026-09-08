@@ -44,7 +44,8 @@ type consumedEntry struct {
 	At   time.Time `json:"at"`
 }
 type lease struct {
-	ID          string    `json:"requestId"`
+	ID          string `json:"requestId"`
+	provider    string
 	ArmedAt     time.Time `json:"armedAt"`
 	ExpiresAt   time.Time `json:"expiresAt"`
 	code        string
@@ -61,7 +62,7 @@ type broker struct {
 	terminal     bool
 	request      *lease
 	changed      chan struct{}
-	senders      map[string]bool
+	providers    map[string]*providerRule
 	seen         map[string]time.Time
 	consumed     []consumedEntry
 	consumedPath string
@@ -71,15 +72,9 @@ type broker struct {
 }
 
 func newBroker(senders []string, consumedPath string) (*broker, error) {
-	b := &broker{now: time.Now, health: "connecting", changed: make(chan struct{}), senders: map[string]bool{}, seen: map[string]time.Time{}, consumedPath: consumedPath, persist: writePrivateJSON, waitDuration: 20 * time.Second}
-	for _, sender := range senders {
-		if sender == "" || sender != strings.TrimSpace(sender) || len(sender) > 100 {
-			return nil, errors.New("invalid sender configuration")
-		}
-		b.senders[sender] = true
-	}
-	if len(b.senders) == 0 {
-		return nil, errors.New("Clal sender is not configured")
+	b := &broker{now: time.Now, health: "connecting", changed: make(chan struct{}), providers: map[string]*providerRule{}, seen: map[string]time.Time{}, consumedPath: consumedPath, persist: writePrivateJSON, waitDuration: 20 * time.Second}
+	if err := b.configureProvider(clalProvider, senders, clalCode); err != nil {
+		return nil, err
 	}
 	if err := readPrivateJSON(consumedPath, &b.consumed); err != nil {
 		// Missing is the only permitted empty initial state.
@@ -116,20 +111,17 @@ func (b *broker) setHealth(online bool, state string) {
 	b.signalLocked()
 }
 
-func (b *broker) eligible(id string, timestamp time.Time) bool {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	now := b.now()
-	return b.online && b.request != nil && !b.request.delivered && !b.request.ambiguous && now.Before(b.request.ExpiresAt) && !timestamp.Before(b.request.ArmedAt) && !timestamp.After(now.Add(time.Second)) && id != ""
-}
-
 // Only already parsed, incoming, non-backfilled candidate messages reach this function.
-func (b *broker) accept(id, sender, code string, timestamp time.Time) {
+func (b *broker) accept(provider, id, sender, code string, timestamp time.Time) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	now := b.now()
 	hash := messageHash(id)
-	if id == "" || !b.senders[sender] || !regexp.MustCompile(`^[0-9]{6}$`).MatchString(code) {
+	rule := b.providers[provider]
+	if rule == nil || rule.code == nil || b.request == nil || b.request.provider != provider {
+		return
+	}
+	if id == "" || !rule.senders[sender] || !regexp.MustCompile(`^[0-9]{6}$`).MatchString(code) {
 		return
 	}
 	if _, seen := b.seen[hash]; seen {
@@ -188,21 +180,30 @@ func (b *broker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		reply(w, 200, map[string]any{"online": online, "state": state})
 		return
 	}
-	if r.URL.Path == "/v1/clal/arm" && r.Method == "POST" {
+	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+	if len(parts) < 3 || len(parts) > 4 || parts[0] != "v1" || (parts[1] != clalProvider && parts[1] != bestInvestProvider) {
+		reply(w, 404, map[string]string{"error": "not_found"})
+		return
+	}
+	provider := parts[1]
+	if !b.providerEnabled(provider) {
+		reply(w, 503, map[string]string{"error": "receiver_unavailable"})
+		return
+	}
+	if len(parts) == 3 && parts[2] == "arm" && r.Method == "POST" {
 		if !emptyJSON(w, r) {
 			return
 		}
-		b.arm(w, r)
+		b.arm(w, r, provider)
 		return
 	}
-	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
-	if len(parts) < 3 || len(parts) > 4 || parts[0] != "v1" || parts[1] != "clal" || len(parts[2]) != 48 {
+	if len(parts[2]) != 48 {
 		reply(w, 404, map[string]string{"error": "not_found"})
 		return
 	}
 	if len(parts) == 3 && r.Method == "DELETE" {
 		b.mu.Lock()
-		if b.request != nil && b.request.ID == parts[2] {
+		if b.request != nil && b.request.provider == provider && b.request.ID == parts[2] {
 			b.request = nil
 			b.signalLocked()
 		}
@@ -214,7 +215,7 @@ func (b *broker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if !emptyJSON(w, r) {
 			return
 		}
-		b.wait(w, r, parts[2])
+		b.wait(w, r, provider, parts[2])
 		return
 	}
 	reply(w, 404, map[string]string{"error": "not_found"})
@@ -240,7 +241,7 @@ func emptyJSON(w http.ResponseWriter, r *http.Request) bool {
 	return true
 }
 
-func (b *broker) arm(w http.ResponseWriter, req *http.Request) {
+func (b *broker) arm(w http.ResponseWriter, req *http.Request, provider string) {
 	// Confirm phone reachability before the caller requests an SMS. This performs
 	// no message read and stays inside the adapter's ten-second arm deadline.
 	b.mu.Lock()
@@ -270,12 +271,12 @@ func (b *broker) arm(w http.ResponseWriter, req *http.Request) {
 		reply(w, 503, map[string]string{"error": "receiver_unavailable"})
 		return
 	}
-	b.request = &lease{ID: hex.EncodeToString(random[:]), ArmedAt: now, ExpiresAt: now.Add(leaseDuration)}
+	b.request = &lease{ID: hex.EncodeToString(random[:]), provider: provider, ArmedAt: now, ExpiresAt: now.Add(leaseDuration)}
 	b.signalLocked()
 	reply(w, 201, b.request)
 }
 
-func (b *broker) wait(w http.ResponseWriter, req *http.Request, id string) {
+func (b *broker) wait(w http.ResponseWriter, req *http.Request, provider, id string) {
 	timer := time.NewTimer(b.waitDuration)
 	defer timer.Stop()
 	for {
@@ -287,7 +288,7 @@ func (b *broker) wait(w http.ResponseWriter, req *http.Request, id string) {
 			reply(w, 503, map[string]string{"error": "receiver_unavailable"})
 			return
 		}
-		if r == nil || r.ID != id || !now.Before(r.ExpiresAt) || r.delivered {
+		if r == nil || r.provider != provider || r.ID != id || !now.Before(r.ExpiresAt) || r.delivered {
 			b.mu.Unlock()
 			reply(w, 410, map[string]string{"error": "request_gone"})
 			return

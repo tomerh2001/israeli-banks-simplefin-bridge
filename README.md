@@ -11,6 +11,9 @@ Successor of [israeli-banks-sure-importer](https://github.com/tomerh2001/israeli
 
 See [docs/architecture.md](docs/architecture.md) and [docs/securo-simplefin-contract.md](docs/securo-simplefin-contract.md).
 
+[Hachshara Best Invest](docs/best-invest.md) and Clal investments use independent
+read-only feeds for Securo, separate from the bank transaction ledger.
+
 ## Features
 
 - **One process, three jobs**: cron-scheduled scraping (puppeteer, one Chrome profile per company), a SQLite

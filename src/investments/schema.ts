@@ -4,6 +4,7 @@ const id = z.string().trim().min(1).max(255);
 const date = z.iso.date();
 const timestamp = z.iso.datetime();
 const currency = z.string().regex(/^[A-Z]{3}$/);
+export const investmentProviderSchema = z.enum(['clal', 'hachshara_best_invest']);
 
 /** Exact money on the wire and in SQLite: never parse through a float. */
 export const investmentMoneySchema = z.string().regex(/^-?(?:0|[1-9]\d*)\.\d{2}$/).refine(value => value !== '-0.00');
@@ -22,7 +23,7 @@ export const investmentReportSummarySchema = z.strictObject({
 
 export const investmentProductSchema = z.strictObject({
 	id,
-	provider: z.literal('clal'),
+	provider: investmentProviderSchema,
 	/** Actual provider account/policy identity, independent of its display name or classification. */
 	providerProductId: id,
 	kind: z.enum(['pension', 'keren_hishtalmut', 'provident_fund', 'investment']),
@@ -111,7 +112,7 @@ export const investmentErrorCodeSchema = z.enum([
 ]);
 
 export const investmentSourceStateSchema = z.strictObject({
-	provider: z.literal('clal'),
+	provider: investmentProviderSchema,
 	status: z.enum(['ok', 'partial', 'auth_required', 'error', 'never_synced']),
 	lastAttemptAt: timestamp.nullable(),
 	lastSuccessAt: timestamp.nullable(),

@@ -223,6 +223,13 @@ control access. A missing or unresolved control token leaves financial and bank
 feeds available. Keep the control token in the consuming application's backend;
 never embed it in browser requests or an access URL.
 
+Clal uses the `/investments/v1/control` route prefix and
+`investments.controlToken`. Best Invest uses
+`/investments/best-invest/v1/control` and `bestInvest.controlToken`, with
+`X-Investment-Provider: hachshara_best_invest` on refresh. Each provider resolves
+its own read and control tokens and operates on its own collector and store.
+The operations below apply under either provider prefix.
+
 Both control operations require `Authorization: Bearer <control token>` and
 return `Cache-Control: no-store`. Browser-origin requests and query parameters
 are rejected. SimpleFIN credentials and the investment read token cannot use
@@ -256,6 +263,12 @@ A provider identity mismatch returns HTTP409 `source_identity_mismatch`; missing
 control configuration or runtime availability returns HTTP503
 `investment_control_unavailable`. A disabled/invalid schedule reports no next
 run, rather than an estimated date.
+
+Best Invest automatic OTP remains unavailable until its actual sender and SMS
+format have been verified. A configured socket reports `enabled: true`,
+`ready: false`, and `reason: unavailable`; shared receiver health alone cannot
+make Best Invest ready. Without a socket the reason is `not_configured`. An
+active SMS cooldown takes precedence as `rate_limited`.
 
 The receiver being ready confirms current receiver health, not future delivery
 or a completed unattended collection. An offline phone, expired pairing,

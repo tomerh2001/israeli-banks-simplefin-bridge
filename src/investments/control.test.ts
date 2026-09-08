@@ -2,6 +2,7 @@ import {mkdtempSync, rmSync} from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {afterEach, describe, expect, it, vi} from 'vitest';
+import {Hono} from 'hono';
 import {readRuntimeEnv} from '../config.js';
 import type {Logger} from '../log.js';
 import {investmentConfigSchema} from './config.js';
@@ -231,5 +232,45 @@ describe('asynchronous bounded collection requests', () => {
 		expect(await statusPart(runtime, 'source')).toMatchObject({status: 'auth_required', lastSuccessAt: '2026-09-08T06:00:00.000Z'});
 		expect(login).toHaveBeenCalledOnce();
 		expect(JSON.stringify(vi.mocked(logger.warn).mock.calls)).not.toContain('123456');
+	});
+});
+
+describe('provider control isolation in one application', () => {
+	it('keeps both providers routed independently and does not infer Best Invest OTP readiness', async () => {
+		const clalCollect = vi.fn(async () => 'ok' as const);
+		const bestCollect = vi.fn(async () => 'ok' as const);
+		const bestReadToken = 'synthetic-best-read-capability-0123456789';
+		const bestControlToken = 'synthetic-best-control-capability-0123456789';
+		const bestAuthorization = {authorization: `Bearer ${bestControlToken}`};
+		const clal = await start({collect: clalCollect});
+		const best = await start({
+			provider: 'hachshara_best_invest', collect: bestCollect,
+			config: {...config, readToken: bestReadToken, controlToken: bestControlToken, googleMessagesOtpSocket: '/synthetic/shared-receiver.sock'},
+			secrets: {resolve: async reference => reference, resolveAll: async values => values},
+			otpHealth: async () => ({ready: true, reason: 'ready'}),
+		});
+		const app = new Hono();
+		app.route('/', clal.router);
+		app.route('/', best.router);
+		const bestStatus = '/investments/best-invest/v1/control/status';
+		const bestRefresh = '/investments/best-invest/v1/control/refresh';
+		const clalResponse = await app.request(statusUrl, {headers: authorization});
+		expect(clalResponse.status).toBe(200);
+		expect(await clalResponse.json()).toMatchObject({source: {provider: 'clal'}});
+		const bestResponse = await app.request(bestStatus, {headers: bestAuthorization});
+		expect(bestResponse.status).toBe(200);
+		expect(await bestResponse.json()).toMatchObject({
+			source: {provider: 'hachshara_best_invest'},
+			automaticOtp: {enabled: true, ready: false, reason: 'unavailable'},
+		});
+		expect(await responseStatus(app.request(bestStatus, {headers: authorization}))).toBe(403);
+		expect(await responseStatus(app.request(bestRefresh, {method: 'POST', headers: {...bestAuthorization, ...providerHeader}}))).toBe(409);
+		expect(await responseStatus(app.request(refreshUrl, {method: 'POST', headers: {...authorization, 'x-investment-provider': 'hachshara_best_invest'}}))).toBe(409);
+		expect(clalCollect).not.toHaveBeenCalled();
+		expect(bestCollect).not.toHaveBeenCalled();
+		expect(await responseStatus(app.request(refreshUrl, {method: 'POST', headers: {...authorization, ...providerHeader}}))).toBe(202);
+		expect(await responseStatus(app.request(bestRefresh, {method: 'POST', headers: {...bestAuthorization, 'x-investment-provider': 'hachshara_best_invest'}}))).toBe(202);
+		expect(clalCollect).toHaveBeenCalledOnce();
+		expect(bestCollect).toHaveBeenCalledOnce();
 	});
 });

@@ -10,6 +10,7 @@ export type InvestmentRouterOptions = {
 	sessionKeepAliveMinutes?: number;
 	logger: Logger;
 	now?: () => Date;
+	feedPath?: '/investments/v1' | '/investments/best-invest/v1';
 };
 
 function digest(value: string): Uint8Array {
@@ -35,7 +36,8 @@ export function createInvestmentRouter(options: InvestmentRouterOptions): Hono {
 	const tokenHash = digest(options.readToken ?? '');
 	const configured = Boolean(options.readToken && options.readToken.length >= 32 && !/\s/.test(options.readToken));
 	const now = options.now ?? (() => new Date());
-	for (const route of ['/investments/v1', '/investments/v1/session-status']) {
+	const feedPath = options.feedPath ?? '/investments/v1';
+	for (const route of [feedPath, `${feedPath}/session-status`]) {
 		router.get(route, c => {
 			c.header('Cache-Control', 'no-store');
 			const match = /^bearer (?<token>\S+)$/i.exec(c.req.header('authorization') ?? '');

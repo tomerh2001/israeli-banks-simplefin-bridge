@@ -6,7 +6,7 @@
  */
 
 import type {CompanyTypes} from 'israeli-bank-scrapers';
-import type {InvestmentConfig} from './investments/config.js';
+import type {BestInvestConfig, InvestmentConfig} from './investments/config.js';
 
 export type CompanyId = `${CompanyTypes}`;
 
@@ -93,6 +93,7 @@ export type Config = {
 	companies: Partial<Record<CompanyId, CompanyConfig>>;
 	/** Dedicated investment collection/feed; never exported as SimpleFIN accounts. */
 	investments?: InvestmentConfig;
+	bestInvest?: BestInvestConfig;
 	server: ServerConfig;
 };
 

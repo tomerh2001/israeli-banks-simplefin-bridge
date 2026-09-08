@@ -5,6 +5,7 @@ import type {
 	investmentErrorCodeSchema,
 	investmentFeedSchema,
 	investmentProductSchema,
+	investmentProviderSchema,
 	investmentReportSummarySchema,
 	investmentSnapshotSchema,
 	investmentSourceStateSchema,
@@ -13,6 +14,7 @@ import type {
 } from './schema.js';
 
 export type InvestmentProduct = z.infer<typeof investmentProductSchema>;
+export type InvestmentProvider = z.infer<typeof investmentProviderSchema>;
 export type InvestmentReportSummary = z.infer<typeof investmentReportSummarySchema>;
 export type InvestmentValuation = z.infer<typeof investmentValuationSchema>;
 export type InvestmentActivity = z.infer<typeof investmentActivitySchema>;

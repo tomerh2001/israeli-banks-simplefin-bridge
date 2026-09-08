@@ -1,4 +1,4 @@
-import type {InvestmentValuation} from './types.js';
+import type {InvestmentProvider, InvestmentValuation} from './types.js';
 
 function part(value: string): string {
 	const trimmed = value.trim();
@@ -18,8 +18,8 @@ function checked(value: string): string {
 }
 
 /** Provider identity only: product renames and kind corrections do not change identity. */
-export function investmentProductId(providerProductId: string): string {
-	return checked(`clal:${part(providerProductId)}`);
+export function investmentProductId(providerProductId: string, provider: InvestmentProvider = 'clal'): string {
+	return checked(`${provider}:${part(providerProductId)}`);
 }
 
 /** Corrections retain their identity; the store retains earlier revisions separately. */

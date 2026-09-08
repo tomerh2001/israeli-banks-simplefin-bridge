@@ -10,7 +10,7 @@ import {createInvestmentControlRouter, type InvestmentControlStatus, type Invest
 import {readGoogleMessagesHealth, type GoogleMessagesHealth} from './otp.js';
 import {createInvestmentRouter, getClalSessionStatus} from './router.js';
 import {createInvestmentStore} from './store.js';
-import type {ClalSessionState, InvestmentStore} from './types.js';
+import type {ClalSessionState, InvestmentProvider, InvestmentStore} from './types.js';
 
 export type InvestmentCollectionContext = {
 	config: InvestmentConfig;
@@ -33,6 +33,7 @@ export type InvestmentRuntimeOptions = Omit<InvestmentCollectionContext, 'store'
 	/** Read-only receiver liveness; no login or SMS side effects. */
 	otpHealth?: (socketPath: string) => Promise<GoogleMessagesHealth>;
 	now?: () => Date;
+	provider?: InvestmentProvider;
 };
 
 export type InvestmentRuntime = {
@@ -50,10 +51,12 @@ export type InvestmentRuntime = {
 /** Independent lifecycle: no startup collection, bank ledger writes, or SimpleFIN credentials. */
 export async function createInvestmentRuntime(options: InvestmentRuntimeOptions): Promise<InvestmentRuntime> {
 	const {config, env, secrets, logger} = options;
+	const provider = options.provider ?? 'clal';
+	const isBestInvest = provider === 'hachshara_best_invest';
 	const now = options.now ?? (() => new Date());
 	let store: InvestmentStore | undefined;
 	try {
-		store = createInvestmentStore(path.join(env.dataDir, 'investments.sqlite'));
+		store = createInvestmentStore(path.join(env.dataDir, isBestInvest ? 'best-invest.sqlite' : 'investments.sqlite'), provider);
 	} catch {
 		logger.error('investment database unavailable; bank service remains available');
 	}
@@ -82,6 +85,7 @@ export async function createInvestmentRuntime(options: InvestmentRuntimeOptions)
 	const router = createInvestmentRouter({
 		store, readToken, staleHours: config.staleHours,
 		sessionKeepAliveMinutes: config.sessionKeepAliveMinutes, logger, now,
+		feedPath: isBestInvest ? '/investments/best-invest/v1' : '/investments/v1',
 	});
 	let task: ScheduledTask | undefined;
 	let sessionTimer: ReturnType<typeof setInterval> | undefined;
@@ -213,7 +217,7 @@ export async function createInvestmentRuntime(options: InvestmentRuntimeOptions)
 
 		if (Date.now() > attempt.deadline) {
 			scheduledCollection = undefined;
-			logger.warn('Clal scheduled collection retry window expired');
+			logger.warn('investment scheduled collection retry window expired');
 			return;
 		}
 
@@ -223,7 +227,7 @@ export async function createInvestmentRuntime(options: InvestmentRuntimeOptions)
 		} catch {
 			if (scheduledCollection === attempt) {
 				scheduledCollection = undefined;
-				logger.error('Clal scheduled collection failed');
+				logger.error('investment scheduled collection failed');
 			}
 
 			return;
@@ -242,7 +246,7 @@ export async function createInvestmentRuntime(options: InvestmentRuntimeOptions)
 
 		if (Date.now() + 30_000 > attempt.deadline) {
 			scheduledCollection = undefined;
-			logger.warn('Clal scheduled collection retry window expired');
+			logger.warn('investment scheduled collection retry window expired');
 			return;
 		}
 
@@ -282,9 +286,10 @@ export async function createInvestmentRuntime(options: InvestmentRuntimeOptions)
 		}
 
 		const socketPath = config.googleMessagesOtpSocket;
-		const health = socketPath
+		// Shared socket liveness does not establish verified Best Invest OTP support.
+		const health = socketPath && !isBestInvest
 			? await (options.otpHealth ?? readGoogleMessagesHealth)(socketPath)
-			: {ready: false, reason: 'not_configured' as const};
+			: {ready: false, reason: socketPath ? 'unavailable' as const : 'not_configured' as const};
 		const observedAt = now();
 		const nextAllowedAt = store.getAutomaticSmsNextAllowedAt(observedAt.toISOString());
 		let description: InvestmentControlStatus['schedule']['description'] = null;
@@ -311,12 +316,12 @@ export async function createInvestmentRuntime(options: InvestmentRuntimeOptions)
 		};
 	};
 
-	const controlRefresh = (provider: string): InvestmentRefreshResult => {
+	const controlRefresh = (requestedProvider: string): InvestmentRefreshResult => {
 		if (closed || !config.enabled || !store || !options.collect) {
 			return {error: 'investment_control_unavailable'};
 		}
 
-		if (provider !== store.getFeed(now(), config.staleHours).source.provider) {
+		if (requestedProvider !== store.getFeed(now(), config.staleHours).source.provider) {
 			return {error: 'source_identity_mismatch'};
 		}
 
@@ -334,7 +339,7 @@ export async function createInvestmentRuntime(options: InvestmentRuntimeOptions)
 		return {result: 'started', retryAfterSeconds: 0};
 	};
 
-	router.route('/investments/v1/control', createInvestmentControlRouter({
+	router.route(isBestInvest ? '/investments/best-invest/v1/control' : '/investments/v1/control', createInvestmentControlRouter({
 		controlToken, readToken, logger, status: controlStatus, refresh: controlRefresh,
 	}));
 
@@ -356,7 +361,7 @@ export async function createInvestmentRuntime(options: InvestmentRuntimeOptions)
 						if (generation === scheduledGeneration) {
 							await runScheduledCollection();
 						}
-					}, {timezone: options.timezone, name: 'clal-investments'});
+					}, {timezone: options.timezone, name: `${provider}-investments`});
 					logger.info('investment scheduler started', {schedule: config.schedule, timezone: options.timezone});
 				} else {
 					logger.error('investment schedule invalid; bank schedule remains available');

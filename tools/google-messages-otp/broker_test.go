@@ -75,7 +75,7 @@ func TestLeaseSingleUseAndPersistentDedup(t *testing.T) {
 		t.Fatal("parallel arm accepted")
 	}
 	*now = now.Add(time.Second)
-	b.accept("message1", "ExactClalSender", "123456", *now)
+	b.accept(clalProvider, "message1", "ExactClalSender", "123456", *now)
 	w := request(b, "POST", "/v1/clal/"+l.ID+"/wait", "{}")
 	if w.Code != 200 {
 		t.Fatalf("wait status %d", w.Code)
@@ -107,7 +107,7 @@ func TestLeaseSingleUseAndPersistentDedup(t *testing.T) {
 	b2.setHealth(true, "ready")
 	l2 := armTest(t, b2)
 	*now = now.Add(time.Second)
-	b2.accept("message1", "ExactClalSender", "123456", *now)
+	b2.accept(clalProvider, "message1", "ExactClalSender", "123456", *now)
 	if request(b2, "POST", "/v1/clal/"+l2.ID+"/wait", "{}").Code != 202 {
 		t.Fatal("persistently consumed ID accepted")
 	}
@@ -116,15 +116,15 @@ func TestLeaseSingleUseAndPersistentDedup(t *testing.T) {
 func TestRejectStaleWrongSenderFutureAndAmbiguous(t *testing.T) {
 	b, now := newTestBroker(t)
 	l := armTest(t, b)
-	b.accept("wrong", "OtherSender", "123456", now.Add(time.Second))
-	b.accept("stale", "ExactClalSender", "123456", now.Add(-time.Second))
-	b.accept("future", "ExactClalSender", "123456", now.Add(time.Minute))
+	b.accept(clalProvider, "wrong", "OtherSender", "123456", now.Add(time.Second))
+	b.accept(clalProvider, "stale", "ExactClalSender", "123456", now.Add(-time.Second))
+	b.accept(clalProvider, "future", "ExactClalSender", "123456", now.Add(time.Minute))
 	if request(b, "POST", "/v1/clal/"+l.ID+"/wait", "{}").Code != 202 {
 		t.Fatal("invalid candidate accepted")
 	}
 	*now = now.Add(time.Second)
-	b.accept("new1", "ExactClalSender", "123456", *now)
-	b.accept("new2", "ExactClalSender", "654321", *now)
+	b.accept(clalProvider, "new1", "ExactClalSender", "123456", *now)
+	b.accept(clalProvider, "new2", "ExactClalSender", "654321", *now)
 	if request(b, "POST", "/v1/clal/"+l.ID+"/wait", "{}").Code != 409 {
 		t.Fatal("ambiguous candidates accepted")
 	}
@@ -166,26 +166,26 @@ func TestCandidatesRejectBackfillOutgoingMissingTimestampAndMMS(t *testing.T) {
 		MessageStatus: &gmproto.MessageStatus{Status: gmproto.MessageStatusType_INCOMING_COMPLETE},
 		MessageInfo:   []*gmproto.MessageInfo{{Data: &gmproto.MessageInfo_MessageContent{MessageContent: &gmproto.MessageContent{Content: textCode}}}},
 	}}
-	if _, _, ok := candidate(m); !ok {
+	if _, _, ok := candidate(m, clalCode); !ok {
 		t.Fatal("valid message rejected")
 	}
 	m.IsOld = true
-	if _, _, ok := candidate(m); ok {
+	if _, _, ok := candidate(m, clalCode); ok {
 		t.Fatal("backfill accepted")
 	}
 	m.IsOld = false
 	m.MessageStatus.Status = gmproto.MessageStatusType_OUTGOING_COMPLETE
-	if _, _, ok := candidate(m); ok {
+	if _, _, ok := candidate(m, clalCode); ok {
 		t.Fatal("outgoing accepted")
 	}
 	m.MessageStatus.Status = gmproto.MessageStatusType_INCOMING_COMPLETE
 	m.Timestamp = 0
-	if _, _, ok := candidate(m); ok {
+	if _, _, ok := candidate(m, clalCode); ok {
 		t.Fatal("missing timestamp accepted")
 	}
 	m.Timestamp = time.Now().UnixMicro()
 	m.Type = 2
-	if _, _, ok := candidate(m); ok {
+	if _, _, ok := candidate(m, clalCode); ok {
 		t.Fatal("MMS accepted")
 	}
 }
@@ -224,7 +224,7 @@ func TestPersistenceFailureRemainsUnavailableAfterReconnect(t *testing.T) {
 	b, now := newTestBroker(t)
 	l := armTest(t, b)
 	*now = now.Add(time.Second)
-	b.accept("new", "ExactClalSender", "123456", *now)
+	b.accept(clalProvider, "new", "ExactClalSender", "123456", *now)
 	b.persist = func(string, any) error { return errors.New("disk unavailable") }
 	if request(b, "POST", "/v1/clal/"+l.ID+"/wait", "{}").Code != 503 {
 		t.Fatal("failed persistence delivered a code")

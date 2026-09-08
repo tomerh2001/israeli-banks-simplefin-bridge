@@ -12,7 +12,7 @@ needs_display() {
         [ "$#" -ge 2 ] || return 1
         shift 2
         ;;
-      --config=*|--data-dir=*|--from=*|--to=*|--label=*|--account=*|--verbose|--force|--rotate|--manual-otp) shift ;;
+      --config=*|--data-dir=*|--from=*|--to=*|--label=*|--account=*|--verbose|--force|--rotate|--manual-otp|--email) shift ;;
       --) shift; break ;;
       -h|--help) return 1 ;;
       -*) return 1 ;;
@@ -20,7 +20,7 @@ needs_display() {
     esac
   done
   case "${1:-}" in
-    serve|scrape|clal-login|clal-sync|clal-renew) return 0 ;;
+    serve|scrape|clal-login|clal-sync|clal-renew|best-invest-login|best-invest-sync) return 0 ;;
     *) return 1 ;;
   esac
 }

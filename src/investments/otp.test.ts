@@ -13,7 +13,7 @@ function json(response: ServerResponse, status: number, value: unknown): void {
 	response.writeHead(status, {'Content-Type': 'application/json'}).end(JSON.stringify(value));
 }
 
-async function receiver(handler: (request: IncomingMessage, response: ServerResponse) => void) {
+async function receiver(handler: (request: IncomingMessage, response: ServerResponse) => void, provider: 'clal' | 'best-invest' = 'clal') {
 	const directory = mkdtempSync(path.join(os.tmpdir(), 'clal-otp-test-'));
 	const socketPath = path.join(directory, 'receiver.sock');
 	const server = createServer(handler);
@@ -21,7 +21,7 @@ async function receiver(handler: (request: IncomingMessage, response: ServerResp
 	await new Promise<void>(resolve => {
 		server.listen(socketPath, resolve);
 	});
-	return {...createGoogleMessagesOtpSource(socketPath), health: async () => readGoogleMessagesHealth(socketPath)};
+	return {...createGoogleMessagesOtpSource(socketPath, provider), health: async () => readGoogleMessagesHealth(socketPath)};
 }
 
 function lease(lifetime = 180_000) {
@@ -42,6 +42,25 @@ afterEach(async () => {
 });
 
 describe('Google Messages OTP Unix socket client', () => {
+	it('routes Best Invest arming, consumption, and cancellation only to its provider', async () => {
+		const current = lease();
+		const operations: string[] = [];
+		const source = await receiver((request, response) => {
+			operations.push(`${request.method} ${request.url}`);
+			if (request.url === '/v1/best-invest/arm') {
+				json(response, 201, current);
+			} else if (request.method === 'DELETE') {
+				response.writeHead(204).end();
+			} else {
+				json(response, 200, {requestId, code: '654321', expiresAt: current.expiresAt});
+			}
+		}, 'best-invest');
+		const prepared = await source.prepare(new AbortController().signal);
+		expect(await prepared.read(new AbortController().signal)).toBe('654321');
+		await prepared.cancel();
+		expect(operations).toEqual(['POST /v1/best-invest/arm', `POST /v1/best-invest/${requestId}/wait`, `DELETE /v1/best-invest/${requestId}`]);
+	});
+
 	it.each([
 		[{online: true, state: 'ready'}, {ready: true, reason: 'ready'}],
 		[{online: false, state: 'phone_unavailable'}, {ready: false, reason: 'phone_unavailable'}],

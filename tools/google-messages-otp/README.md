@@ -1,4 +1,4 @@
-# Google Messages receiver for Clal OTP
+# Google Messages receiver for investment OTPs
 
 This separate Go executable uses the Google Messages protocol library
 [`libgm` v0.2608.0](https://github.com/mautrix/gmessages/tree/v0.2608.0/pkg/libgm)
@@ -93,6 +93,37 @@ message-ID hashes is atomically persisted before a code is delivered. Leases
 are never persisted, and disconnects invalidate them. No SMS mechanism can
 cryptographically distinguish this login's code from a simultaneous external
 Clal login, so the bridge must also hold its Clal profile lock throughout login.
+
+
+## Additional investment providers
+
+Best Invest has separate routes:
+`POST /v1/best-invest/arm`,
+`POST /v1/best-invest/{requestId}/wait`, and
+`DELETE /v1/best-invest/{requestId}`.
+Their response formats match the Clal routes.
+
+An optional `--best-invest-senders-file /state/best-invest-senders.json` supplies
+a private JSON array of exact sender addresses verified through a controlled
+Best Invest login. It is separate from the required Clal sender file. Missing,
+invalid or unverified sender configuration cannot fall back to Clal matching.
+
+Provider availability additionally requires a verified exact SMS template.
+Until a controlled Best Invest SMS supplies that evidence, the Best Invest
+matcher remains disabled in source and its routes return 503, even when the
+sender file is supplied. Synthetic test templates are never installed in the
+running receiver.
+
+There is one global lease across providers. A Best Invest lease prevents a
+simultaneous Clal arm and vice versa. The active lease selects the only template
+and exact sender set eligible for matching or conversation lookup. Waiting on
+another provider's lease returns 410; cancellation through another provider's
+route has no effect. The global consumed-message hashes also prevent a source
+message from being delivered again through another provider.
+
+Clal's existing flags, routes, template and pairing process remain unchanged.
+The health endpoint describes the shared connection; callers must successfully
+arm their own provider before requesting an SMS.
 
 ## Verified upstream entry points
 

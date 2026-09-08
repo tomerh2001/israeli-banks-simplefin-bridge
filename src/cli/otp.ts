@@ -15,6 +15,7 @@ export async function readOneTimeCode(
 	signal: AbortSignal,
 	input: OtpInput = process.stdin,
 	output: Pick<Writable, 'write'> = process.stderr,
+	provider = 'Clal',
 ): Promise<string> {
 	if (signal.aborted) {
 		throw new OtpInputError('OTP entry canceled');
@@ -113,7 +114,7 @@ export async function readOneTimeCode(
 				changedRawMode = true;
 			}
 
-			output.write('Clal sent an SMS code. Enter the 6-digit code (hidden): ');
+			output.write(`${provider} sent a verification code. Enter the 6-digit code (hidden): `);
 			input.resume();
 			if (input.readableEnded || input.destroyed) {
 				onEnd();

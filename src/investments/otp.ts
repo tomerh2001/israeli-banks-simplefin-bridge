@@ -126,7 +126,7 @@ function timestamp(value: unknown): number {
 }
 
 /** Google Messages stays in a separate receiver; this client cannot list an inbox or send SMS. */
-export function createGoogleMessagesOtpSource(socketPath: string): ClalOtpSource {
+export function createGoogleMessagesOtpSource(socketPath: string, provider: 'clal' | 'best-invest' = 'clal'): ClalOtpSource {
 	if (!path.isAbsolute(socketPath) || socketPath.includes('\0')) {
 		throw new ClalCollectionError('INVALID_RESPONSE');
 	}
@@ -134,13 +134,13 @@ export function createGoogleMessagesOtpSource(socketPath: string): ClalOtpSource
 	return {
 		async prepare(signal) {
 			const startedAt = Date.now();
-			const response = objectResponse(await receiverRequest(socketPath, 'POST', '/v1/clal/arm', 10_000, signal), 201, ['requestId', 'armedAt', 'expiresAt']);
+			const response = objectResponse(await receiverRequest(socketPath, 'POST', `/v1/${provider}/arm`, 10_000, signal), 201, ['requestId', 'armedAt', 'expiresAt']);
 			const {requestId} = response;
 			if (typeof requestId !== 'string' || !/^[\w-]{20,128}$/.test(requestId)) {
 				throw new ClalCollectionError('INVALID_RESPONSE');
 			}
 
-			const route = `/v1/clal/${requestId}`;
+			const route = `/v1/${provider}/${requestId}`;
 			const requestController = new AbortController();
 			let canceled = false;
 			let reading = false;
