@@ -4,6 +4,76 @@ Step-by-step instructions for pointing a self-hosted [Securo](https://usesecuro.
 The wire contract behind every step is in [securo-simplefin-contract.md](./securo-simplefin-contract.md); line
 references below are to the Securo backend source at that version.
 
+## Active deployment: 2026-09-08
+
+Release [v1.0.3](https://github.com/tomerh2001/israeli-banks-simplefin-bridge/releases/tag/v1.0.3),
+from merged [PR #13](https://github.com/tomerh2001/israeli-banks-simplefin-bridge/pull/13), is running through
+`latest` at digest `sha256:e14a54c5e03778a4a55a3982007ac8a99f4e97c9185e77a12437f8a6f4de0c08`.
+Its 221 offline tests, lint, typecheck, and image checks passed. A separate smoke check confirmed the published
+image renders a headed browser on its virtual display and shuts down promptly without a forced kill.
+
+Both companies use verified credentials from the Home Server 1Password vault. Hapoalim's trusted browser
+profile was enrolled through the real SMS challenge and runs headed; CAL runs headless. Both scheduled
+06:00 Asia/Jerusalem scrapes succeeded on September 8. Collection runs at 06:00 and 18:00, with a maximum of
+two login attempts per company per local calendar day. An assisted or diagnostic login must also consume
+that allowance. Native Securo synchronization reads the bridge cache and does not log into either bank.
+
+The existing user's personal ILS workspace now has one active SimpleFIN connection with 15 imported accounts:
+one Hapoalim checking account and 14 CAL credit cards. Ownership and native account visibility were verified
+against the intended user and workspace. The original manual USD checking account was preserved. CAL accounts
+were retyped through Securo's native account service; close and due days remain unset. Pending imports,
+synthetic card payments, and asset synchronization remain off.
+
+Ten source accounts lack a reported balance. Their provider names carry `(balance unavailable)`, which remains
+visible in Securo; its numeric zero placeholder is not a verified zero balance. No card was inferred to be
+closed, and no display-name override was set. A workspace rule categorizes exact CAL repayment debits on the
+imported Hapoalim account as Transfers, retaining the balance effect without counting card spending twice.
+
+Securo's worker and scheduler are running. The hourly dispatch only selects connections older than four hours,
+so automatic consumer updates normally follow every four to five hours. A manual connection sync reads the
+latest available cache immediately. The historical audit below records earlier deployment stages; their disabled
+provider and unconnected destination states no longer describe the active deployment.
+
+### Verified historical migration
+
+The existing connection contains **4,120 posted imported transactions** as of September 8: **819 Hapoalim**
+and **3,301 CAL**, spanning December 7, 2023 through September 7, 2026. The destination sync added 2,540
+transactions to the initial 1,580; it did not create another connection or account tree.
+
+Recovery combined the newer retired Sure database, its April SQL backup, the Actual cache, and a bounded bank
+request for April 27–May 4. The archived sources contributed 2,531 reviewed transactions; the bank request
+recovered nine additional posted transactions and closed that known date gap. The original Sure PostgreSQL
+directory was never started for writing: recovery used a private isolated copy, then removed its temporary
+container. Private source exports, checksums, inclusion/exclusion decisions, and database backups remain under
+the bridge data directory's restricted `migration/` folder.
+
+The published bridge ID and ledger APIs inserted the reviewed records. A trial on a consistent SQLite copy and
+the live insert both preserved existing transactions, account balances and metadata, source freshness, and run
+history; the repeat insert added zero records and reported zero anomalies. The separate bounded bank login
+used the second Hapoalim login allowance for September 8, so its 18:00 collection is skipped that day. Normal
+Hapoalim collection resumes at 06:00 on September 9; CAL retains its ordinary schedule.
+
+The destination verification compared every eligible source ID, account, signed amount, date, description,
+currency, status and primary amount, with zero missing/unexpected rows or duplicate IDs. It also checked the
+exact linked account set, current balances, and preservation of the manual account and its transactions.
+A second cached sync retained the same 4,120 transaction IDs, added zero transactions, and again passed every
+comparison. All 33 verified CAL repayment debits are categorized as Transfers.
+
+Recovery limits remain explicit:
+
+- 216 Actual-only CAL entries retain their archived purchase/installment date because the old importer did not
+  save a charge date. No billing date was inferred.
+- Fourteen repeated bank cache rows lack evidence of distinct transactions, and two no-ID card entries have
+  unverified settlement status. They remain in private review artifacts instead of inflating imported history.
+- Old aggregate card-payment legs and synthetic reconciliations were excluded. Source transactions with
+  distinct issuer identities or purchase dates were retained even when their merchant, amount and billing
+  date matched another purchase.
+- The bridge currently holds 245 future-dated posted charges and four pending rows beyond the imported set.
+  Posted charges become eligible on their booking dates; pending rows are excluded by the configured policy.
+- Successful recovery establishes the records obtained from the named sources, not independently proven
+  completeness for every historical interval. The bank's observed 150-row response limit is documented in
+  [operations](./operations.md#hapoalim-history-can-stop-at-150-rows).
+
 ## Host audit: 2026-09-07
 
 Read-only inspection found Securo 0.15.1, image revision
