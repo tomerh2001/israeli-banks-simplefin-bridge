@@ -1,3 +1,8 @@
+// eslint-disable-next-line @typescript-eslint/triple-slash-reference -- Login controls are evaluated in the browser.
+/// <reference lib="dom" />
+/* eslint-disable unicorn/isolated-functions -- document is the browser global inside page.evaluate. */
+// eslint-disable-next-line import-x/no-extraneous-dependencies, n/no-extraneous-import
+import type {Page} from 'puppeteer';
 import type {SecretsResolver} from '../types.js';
 import {redact} from '../log.js';
 import type {InvestmentConfig} from './config.js';
@@ -9,6 +14,29 @@ export type ClalLoginOptions = ClalBrowserOptions & {
 	/** Called only after the portal confirms that it is waiting for an SMS code. Never persist the code. */
 	readOtp(signal: AbortSignal): Promise<string>;
 };
+
+/** Material inputs are visually hidden; preserve selected values instead of toggling them. */
+export async function configureClalLoginDelivery(page: Page): Promise<void> {
+	const configured = await page.evaluate(() => {
+		const radios = [...document.querySelectorAll<HTMLInputElement>('input[type="radio"]')];
+		const sms = radios.filter(input => [...(input.labels ?? [])].some(label => label.textContent?.trim() === 'סמס'));
+		const checkboxes = [...document.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')];
+		if (sms.length !== 1 || checkboxes.length !== 1 || sms[0]!.disabled || checkboxes[0]!.disabled) {
+			return false;
+		}
+
+		for (const input of [sms[0]!, checkboxes[0]!]) {
+			if (!input.checked) {
+				input.click();
+			}
+		}
+
+		return sms[0]!.checked && checkboxes[0]!.checked;
+	});
+	if (!configured) {
+		throw new ClalCollectionError('INVALID_RESPONSE');
+	}
+}
 
 /** Explicit operator command only: scheduled collection must never call this function. */
 export async function assistedClalLogin(options: ClalLoginOptions): Promise<void> {
@@ -35,14 +63,7 @@ export async function assistedClalLogin(options: ClalLoginOptions): Promise<void
 		await page.goto(CLAL_LOGIN_URL, {waitUntil: 'domcontentloaded'});
 		await page.locator('[formcontrolname="tz"]').fill(id);
 		await page.locator('[formcontrolname="mobile"]').fill(phone);
-		// The verified Clal login form has SMS first and exactly one terms checkbox.
-		await page.locator('input[type="radio"]').click();
-		const checkboxes = await page.$$('input[type="checkbox"]');
-		if (checkboxes.length !== 1) {
-			throw new ClalCollectionError('INVALID_RESPONSE');
-		}
-
-		await page.locator('input[type="checkbox"]').click();
+		await configureClalLoginDelivery(page);
 		await page.locator('::-p-aria(שליחה)').click();
 		await page.waitForSelector('[formcontrolname="otp"]', {visible: true});
 		let code = await options.readOtp(signal);
