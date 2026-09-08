@@ -47,6 +47,10 @@ export type InvestmentStore = {
 	setSessionState(state: ClalSessionState): void;
 	/** Atomically reserve one of two automatic SMS attempts in a rolling 24-hour window. Never refunded after an uncertain send. */
 	consumeAutomaticSmsAttempt(attemptedAt: string): boolean;
+	/** A read never reserves an SMS or changes its persistent allowance. */
+	getAutomaticSmsNextAllowedAt(at: string): InvestmentSourceState['lastAttemptAt'];
+	/** Two explicit refresh starts per rolling minute, shared across process restarts. */
+	consumeControlRefreshAttempt(at: string): {allowed: boolean; retryAfterSeconds: number};
 	getFeed(now: Date, staleAfterHours: number): InvestmentFeed;
 	close(): void;
 };

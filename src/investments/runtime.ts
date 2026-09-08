@@ -1,11 +1,14 @@
 import path from 'node:path';
 import {schedule as cronSchedule, validate as cronValidate, type ScheduledTask} from 'node-cron';
+import cronstrue from 'cronstrue';
 import type {Hono} from 'hono';
 import {redact, type Logger} from '../log.js';
 import type {RuntimeEnv, SecretsResolver} from '../types.js';
 import {ClalCollectionError, ClalProfileBusyError, type ClalBrowserOptions} from './browser.js';
 import type {InvestmentConfig} from './config.js';
-import {createInvestmentRouter} from './router.js';
+import {createInvestmentControlRouter, type InvestmentControlStatus, type InvestmentRefreshResult} from './control.js';
+import {readGoogleMessagesHealth, type GoogleMessagesHealth} from './otp.js';
+import {createInvestmentRouter, getClalSessionStatus} from './router.js';
 import {createInvestmentStore} from './store.js';
 import type {ClalSessionState, InvestmentProvider, InvestmentStore} from './types.js';
 
@@ -27,6 +30,8 @@ export type InvestmentRuntimeOptions = Omit<InvestmentCollectionContext, 'store'
 	collect?: InvestmentCollector;
 	/** Renews an existing session and returns its verified remaining lifetime, without requesting an SMS. */
 	maintainSession?: (options: ClalBrowserOptions) => Promise<number>;
+	/** Read-only receiver liveness; no login or SMS side effects. */
+	otpHealth?: (socketPath: string) => Promise<GoogleMessagesHealth>;
 	now?: () => Date;
 	provider?: InvestmentProvider;
 };
@@ -66,6 +71,17 @@ export async function createInvestmentRuntime(options: InvestmentRuntimeOptions)
 		logger.error('investment read token unavailable; bank service remains available');
 	}
 
+	let controlToken: string | undefined;
+	try {
+		// If configured read-secret resolution failed, independence cannot be verified.
+		if (config.controlToken && (!config.readToken || readToken)) {
+			controlToken = await secrets.resolve(config.controlToken);
+			redact(controlToken);
+		}
+	} catch {
+		logger.error('investment control token unavailable; financial feeds remain available');
+	}
+
 	const router = createInvestmentRouter({
 		store, readToken, staleHours: config.staleHours,
 		sessionKeepAliveMinutes: config.sessionKeepAliveMinutes, logger, now,
@@ -74,6 +90,9 @@ export async function createInvestmentRuntime(options: InvestmentRuntimeOptions)
 	let task: ScheduledTask | undefined;
 	let sessionTimer: ReturnType<typeof setInterval> | undefined;
 	let running: Promise<InvestmentCollectionStatus | undefined> | undefined;
+	let lastResult: InvestmentControlStatus['collection']['lastResult'] = null;
+	let lastStartedAt: InvestmentControlStatus['collection']['lastStartedAt'] = null;
+	let lastFinishedAt: InvestmentControlStatus['collection']['lastFinishedAt'] = null;
 	let maintaining: Promise<ClalSessionState | undefined> | undefined;
 	let collectionController: AbortController | undefined;
 	let maintenanceController: AbortController | undefined;
@@ -155,6 +174,7 @@ export async function createInvestmentRuntime(options: InvestmentRuntimeOptions)
 
 		const collectionStore = store;
 		const {collect} = options;
+		lastStartedAt = now().toISOString();
 		const startedGeneration = generation;
 		collectionController = new AbortController();
 		const {signal} = collectionController;
@@ -180,8 +200,11 @@ export async function createInvestmentRuntime(options: InvestmentRuntimeOptions)
 			}
 		})();
 		try {
-			return await running;
+			const result = await running;
+			lastResult = result ?? null;
+			return result;
 		} finally {
+			lastFinishedAt = now().toISOString();
 			running = undefined;
 			collectionController = undefined;
 		}
@@ -256,6 +279,69 @@ export async function createInvestmentRuntime(options: InvestmentRuntimeOptions)
 		maintenanceController?.abort();
 		collectionController?.abort();
 	};
+
+	const controlStatus = async (): Promise<InvestmentControlStatus> => {
+		if (closed || !store) {
+			throw new Error('investment control unavailable');
+		}
+
+		const socketPath = config.googleMessagesOtpSocket;
+		// Shared socket liveness does not establish verified Best Invest OTP support.
+		const health = socketPath && !isBestInvest
+			? await (options.otpHealth ?? readGoogleMessagesHealth)(socketPath)
+			: {ready: false, reason: socketPath ? 'unavailable' as const : 'not_configured' as const};
+		const observedAt = now();
+		const nextAllowedAt = store.getAutomaticSmsNextAllowedAt(observedAt.toISOString());
+		let description: InvestmentControlStatus['schedule']['description'] = null;
+		try {
+			description = cronstrue.toString(config.schedule).slice(0, 256);
+		} catch {
+			// Invalid expressions remain visible as a disabled schedule, without inferred dates.
+		}
+
+		return {
+			schemaVersion: 1, observedAt: observedAt.toISOString(),
+			source: store.getFeed(observedAt, config.staleHours).source,
+			collection: {running: Boolean(running), lastResult, lastStartedAt, lastFinishedAt},
+			schedule: {
+				enabled: Boolean(task), expression: config.schedule.slice(0, 256), description,
+				timezone: options.timezone.slice(0, 100), nextRunAt: task?.getNextRun()?.toISOString() ?? null,
+			},
+			automaticOtp: {
+				enabled: Boolean(socketPath), ready: health.ready && nextAllowedAt === null,
+				reason: socketPath && nextAllowedAt ? 'rate_limited' : health.reason,
+				nextAllowedAt: socketPath ? nextAllowedAt : null,
+			},
+			session: getClalSessionStatus(store.getSessionState(), observedAt, config.sessionKeepAliveMinutes),
+		};
+	};
+
+	const controlRefresh = (requestedProvider: string): InvestmentRefreshResult => {
+		if (closed || !config.enabled || !store || !options.collect) {
+			return {error: 'investment_control_unavailable'};
+		}
+
+		if (requestedProvider !== store.getFeed(now(), config.staleHours).source.provider) {
+			return {error: 'source_identity_mismatch'};
+		}
+
+		if (running) {
+			return {result: 'already_running', retryAfterSeconds: 0};
+		}
+
+		const allowance = store.consumeControlRefreshAttempt(now().toISOString());
+		if (!allowance.allowed) {
+			return {error: 'refresh_rate_limited', retryAfterSeconds: allowance.retryAfterSeconds};
+		}
+
+		// runNow reserves the same in-process lock as cron before returning its promise.
+		void runNow().catch(() => logger.error('investment control collection failed'));
+		return {result: 'started', retryAfterSeconds: 0};
+	};
+
+	router.route(isBestInvest ? '/investments/best-invest/v1/control' : '/investments/v1/control', createInvestmentControlRouter({
+		controlToken, readToken, logger, status: controlStatus, refresh: controlRefresh,
+	}));
 
 	return {
 		store,

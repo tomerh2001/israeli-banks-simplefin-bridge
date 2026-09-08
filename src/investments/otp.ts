@@ -20,7 +20,7 @@ const maximumBodyBytes = 4096;
 const maximumLeaseMilliseconds = 180_000;
 
 /** Fixed local socket operations only; response content never enters exception messages. */
-async function receiverRequest(socketPath: string, method: 'POST' | 'DELETE', route: string, timeoutMilliseconds: number, signal?: AbortSignal): Promise<ReceiverResponse> {
+async function receiverRequest(socketPath: string, method: 'GET' | 'POST' | 'DELETE', route: string, timeoutMilliseconds: number, signal?: AbortSignal): Promise<ReceiverResponse> {
 	if (signal?.aborted) {
 		throw new ClalCollectionError('TIMEOUT');
 	}
@@ -69,6 +69,25 @@ async function receiverRequest(socketPath: string, method: 'POST' | 'DELETE', ro
 		});
 		request_.end(method === 'POST' ? '{}' : undefined);
 	});
+}
+
+const receiverStates = ['ready', 'connecting', 'disconnected', 'inactive', 'phone_unavailable', 'phone_syncing', 'reauth_required'] as const;
+export type GoogleMessagesHealth = {ready: boolean; reason: typeof receiverStates[number] | 'unavailable'};
+
+/** Reads only receiver liveness. Never arms a lease, lists messages, or requests an SMS. */
+export async function readGoogleMessagesHealth(socketPath: string): Promise<GoogleMessagesHealth> {
+	try {
+		if (!path.isAbsolute(socketPath) || socketPath.includes('\0')) {
+			return {ready: false, reason: 'unavailable'};
+		}
+
+		const value = objectResponse(await receiverRequest(socketPath, 'GET', '/healthz', 3000), 200, ['online', 'state']);
+		const reason = receiverStates.find(state => state === value.state) ?? 'unavailable';
+		const ready = value.online === true && reason === 'ready';
+		return {ready, reason: !ready && reason === 'ready' ? 'unavailable' : reason};
+	} catch {
+		return {ready: false, reason: 'unavailable'};
+	}
 }
 
 function objectResponse(response: ReceiverResponse, expectedStatus: number, keys: string[]): Record<string, unknown> {

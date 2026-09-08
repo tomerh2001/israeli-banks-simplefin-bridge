@@ -212,3 +212,66 @@ To recover manually:
    private data area's recovery archive. Keep its metadata for diagnosis.
 4. Restart the bridge, then perform one collection. Do not delete profile data
    or Chrome singleton files as a shortcut for establishing ownership.
+
+## Collector control API
+
+The financial read token remains read-only. Optional `investments.controlToken`
+accepts a separate 1Password reference, for example
+`op://Home Server/Investment Collector/controlToken`. Generate a new random
+secret of at least 32 characters; reusing the financial read secret disables
+control access. A missing or unresolved control token leaves financial and bank
+feeds available. Keep the control token in the consuming application's backend;
+never embed it in browser requests or an access URL.
+
+Clal uses the `/investments/v1/control` route prefix and
+`investments.controlToken`. Best Invest uses
+`/investments/best-invest/v1/control` and `bestInvest.controlToken`, with
+`X-Investment-Provider: hachshara_best_invest` on refresh. Each provider resolves
+its own read and control tokens and operates on its own collector and store.
+The operations below apply under either provider prefix.
+
+Both control operations require `Authorization: Bearer <control token>` and
+return `Cache-Control: no-store`. Browser-origin requests and query parameters
+are rejected. SimpleFIN credentials and the investment read token cannot use
+these routes, and the control token cannot read the financial feed.
+
+- `GET /investments/v1/control/status` returns schema version 1, observation time,
+  the stored source health/freshness summary, current collection state and its
+  last result/times, actual schedule state/expression/description/timezone/next
+  run, automatic OTP readiness/reason/next allowance time, and the separate
+  verified session observation. It never collects, arms an OTP lease, requests
+  SMS, consumes allowance, or changes financial freshness. Receiver health uses
+  only its bounded local `GET /healthz`, with an allowlist of safe states. No
+  phone number, credentials, account values, message text or OTP is returned.
+- `POST /investments/v1/control/refresh` accepts an empty body or `{}` and requires
+  `X-Investment-Provider` to match the stored source provider. A consuming backend
+  must first compare that provider with the connected financial feed and its
+  own saved provider identity. The bridge repeats the identity check immediately
+  before reserving collection. It returns HTTP202 with
+  `{ "result": "started", "retryAfterSeconds": 0 }`, or `already_running` when
+  sharing existing work. This starts the same collector and automatic recovery
+  policy as cron. Poll status until `collection.running` is false, inspect
+  `lastResult` and source freshness, then import the cached feed into the app.
+  An accepted request is not proof that collection or authentication succeeded.
+
+Explicit refresh starts have a persistent limit of two per rolling minute.
+Overlapping requests share existing work and consume no extra allowance. HTTP429
+returns `refresh_rate_limited`, `retryAfterSeconds` and `Retry-After`. The
+independent persistent maximum of two automatic SMS requests per rolling
+24 hours still applies, across scheduled, manual and control-triggered recovery.
+A provider identity mismatch returns HTTP409 `source_identity_mismatch`; missing
+control configuration or runtime availability returns HTTP503
+`investment_control_unavailable`. A disabled/invalid schedule reports no next
+run, rather than an estimated date.
+
+Best Invest automatic OTP remains unavailable until its actual sender and SMS
+format have been verified. A configured socket reports `enabled: true`,
+`ready: false`, and `reason: unavailable`; shared receiver health alone cannot
+make Best Invest ready. Without a socket the reason is `not_configured`. An
+active SMS cooldown takes precedence as `rate_limited`.
+
+The receiver being ready confirms current receiver health, not future delivery
+or a completed unattended collection. An offline phone, expired pairing,
+provider authentication challenge or source error can still stop a run. Report
+those conditions with the last successful financial collection time; do not
+claim that successful cached feed imports prove scheduled provider collection.
