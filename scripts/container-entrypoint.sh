@@ -20,7 +20,7 @@ needs_display() {
     esac
   done
   case "${1:-}" in
-    serve|scrape|clal-login|clal-sync) return 0 ;;
+    serve|scrape|clal-login|clal-sync|clal-renew) return 0 ;;
     *) return 1 ;;
   esac
 }

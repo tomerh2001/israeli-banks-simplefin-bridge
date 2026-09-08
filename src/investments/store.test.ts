@@ -1,3 +1,6 @@
+import {mkdtempSync, rmSync} from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import {afterEach, describe, expect, it} from 'vitest';
 import {investmentActivityId, investmentProductId, investmentValuationId} from './ids.js';
 import {investmentActivitySchema, investmentMoneySchema, investmentSnapshotSchema} from './schema.js';
@@ -83,6 +86,47 @@ describe('investment contracts', () => {
 });
 
 describe('investment store', () => {
+	it('persists session health separately without changing financial data or source freshness', () => {
+		const directory = mkdtempSync(path.join(os.tmpdir(), 'clal-session-store-test-'));
+		const filename = path.join(directory, 'investments.sqlite');
+		const store = createInvestmentStore(filename);
+		store.applySnapshot(fixture());
+		const before = store.getFeed(new Date(observedAt), 192);
+		expect(store.getSessionState()).toEqual({
+			status: 'unknown', lastCheckedAt: null, lastRenewedAt: null, expiresAt: null, errorCode: null,
+		});
+		const state = {
+			status: 'active' as const, lastCheckedAt: observedAt, lastRenewedAt: observedAt,
+			expiresAt: '2026-09-08T06:20:00.000Z', errorCode: null,
+		};
+		store.setSessionState(state);
+		expect(store.getFeed(new Date(observedAt), 192)).toEqual(before);
+		store.close();
+		const reopened = createInvestmentStore(filename);
+		try {
+			expect(reopened.getSessionState()).toEqual(state);
+			expect(reopened.getFeed(new Date(observedAt), 192)).toEqual(before);
+		} finally {
+			reopened.close();
+			rmSync(directory, {recursive: true, force: true});
+		}
+	});
+
+	it('ignores older session writes and rejects unknown fields without erasing current health', () => {
+		const store = open();
+		const state = {
+			status: 'active' as const, lastCheckedAt: observedAt, lastRenewedAt: observedAt,
+			expiresAt: '2026-09-08T06:20:00.000Z', errorCode: null,
+		};
+		store.setSessionState(state);
+		store.setSessionState({...state, status: 'auth_required', lastCheckedAt: '2026-09-08T05:59:00.000Z', errorCode: 'OTP_REQUIRED'});
+		store.setSessionState({...state, status: 'unknown', lastCheckedAt: null});
+		expect(store.getSessionState()).toEqual(state);
+		const invalid = {...state, raw: 'must never be stored'};
+		expect(() => store.setSessionState(invalid)).toThrow();
+		expect(store.getSessionState()).toEqual(state);
+	});
+
 	it('reports an uninitialized source without fabricating balances', () => {
 		const feed = open().getFeed(new Date(observedAt), 192);
 		expect(feed.source).toMatchObject({status: 'never_synced', lastSuccessAt: null, staleAfterHours: 192});

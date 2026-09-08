@@ -34,6 +34,7 @@ describe('container entrypoint dispatch', () => {
 	it.each([
 		['serve'],
 		['clal-login'],
+		['clal-renew'],
 		['--config', '/config with spaces.json', 'clal-sync'],
 		['scrape', 'hapoalim', '--config', '/config with spaces.json'],
 		['--config', '/config with spaces.json', '--verbose', 'scrape', 'hapoalim'],

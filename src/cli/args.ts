@@ -18,6 +18,7 @@ export type Command =
 	| 'health'
 	| 'clal-login'
 	| 'clal-sync'
+	| 'clal-renew'
 	| 'clal-status'
 	| 'serve';
 
@@ -62,6 +63,7 @@ const COMMANDS: Record<Command, {options: OptionName[]; positional?: 'company'}>
 	health: {options: []},
 	'clal-login': {options: []},
 	'clal-sync': {options: []},
+	'clal-renew': {options: []},
 	'clal-status': {options: []},
 	serve: {options: []},
 };
@@ -86,7 +88,8 @@ Commands:
   health                  Print the health report as JSON; exit 0 when ok, else 1.
   clal-login              Request Clal SMS authentication; enter the code privately on stdin.
   clal-sync               Collect Clal investments using the saved session; never request SMS.
-  clal-status             Print only Clal source health and record counts as JSON.
+  clal-renew              Renew an authenticated Clal session; never request SMS or collect data.
+  clal-status             Print Clal source/session health and record counts as JSON.
   serve                   Start the SimpleFIN server and the scheduler (same as node dist/index.js).
 
 Global options:

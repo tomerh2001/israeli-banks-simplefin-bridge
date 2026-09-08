@@ -1,6 +1,7 @@
 // eslint-disable-next-line import-x/no-extraneous-dependencies, n/no-extraneous-import
 import type {Page} from 'puppeteer';
-import {CLAL_PORTFOLIO_URL, ClalCollectionError, isClalLogin, withClalBrowser} from './browser.js';
+import {CLAL_PORTFOLIO_URL, ClalCollectionError, ClalProfileBusyError, isClalLogin, withClalBrowser} from './browser.js';
+import {readClalSessionRemaining} from './session.js';
 import type {InvestmentCollector} from './runtime.js';
 import type {InvestmentSnapshot} from './types.js';
 
@@ -16,12 +17,35 @@ export function createClalCollector(readSnapshot: ClalSnapshotReader): Investmen
 		const attemptedAt = new Date().toISOString();
 		try {
 			const snapshot = await withClalBrowser({...context, timeoutMinutes: context.config.timeoutMinutes}, async (page, signal) => {
-				await page.goto(CLAL_PORTFOLIO_URL, {waitUntil: 'networkidle2'});
+				await page.goto(CLAL_PORTFOLIO_URL, {waitUntil: 'domcontentloaded'});
 				if (await isClalLogin(page)) {
 					throw new ClalCollectionError('OTP_REQUIRED');
 				}
 
-				return readSnapshot(page, attemptedAt, signal);
+				const snapshot = await readSnapshot(page, attemptedAt, signal);
+				try {
+					// A verified protected snapshot proves access. This ancillary timer read
+					// must not discard financial data if its separate endpoint is unavailable.
+					const remainingSeconds = await readClalSessionRemaining(page);
+					if (!signal.aborted) {
+						const checkedAt = new Date();
+						context.store.setSessionState({
+							...context.store.getSessionState(), status: 'active',
+							lastCheckedAt: checkedAt.toISOString(),
+							expiresAt: new Date(checkedAt.getTime() + (remainingSeconds * 1000)).toISOString(), errorCode: null,
+						});
+					}
+				} catch (error) {
+					if (!signal.aborted) {
+						const errorCode = error instanceof ClalCollectionError ? error.code : 'INVALID_RESPONSE';
+						context.store.setSessionState({
+							...context.store.getSessionState(), status: errorCode === 'OTP_REQUIRED' ? 'auth_required' : 'error',
+							lastCheckedAt: new Date().toISOString(), expiresAt: null, errorCode,
+						});
+					}
+				}
+
+				return snapshot;
 			});
 			if (context.signal.aborted) {
 				return 'error';
@@ -35,8 +59,22 @@ export function createClalCollector(readSnapshot: ClalSnapshotReader): Investmen
 				return 'error';
 			}
 
+			if (error instanceof ClalProfileBusyError) {
+				context.logger.info('Clal collection skipped; profile is in use');
+				return 'skipped';
+			}
+
 			const errorCode = error instanceof ClalCollectionError ? error.code : 'INVALID_RESPONSE';
 			const status = errorCode === 'OTP_REQUIRED' ? 'auth_required' : 'error';
+			if (status === 'auth_required') {
+				context.store.setSessionState({
+					...context.store.getSessionState(), status: 'auth_required',
+					// Browser ownership has already been released. A newer assisted login
+					// must take precedence over this older attempt's authentication failure.
+					lastCheckedAt: attemptedAt, expiresAt: null, errorCode,
+				});
+			}
+
 			context.store.recordFailure({status, attemptedAt, errorCode});
 			context.logger.warn('Clal collection needs attention', {status, errorCode});
 			return status;

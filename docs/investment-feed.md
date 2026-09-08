@@ -101,6 +101,9 @@ status or applying an unfinished snapshot.
 - `bridge clal-sync` collects investments using the saved Clal session. It never
   requests an SMS code. If authentication expired, run `clal-login`, followed by
   `clal-sync`.
+- `bridge clal-renew` explicitly checks protected account access and renews an
+  existing Clal session. It never logs in, requests SMS, or applies financial
+  snapshots. A busy profile is skipped; an unavailable/expired session exits one.
 - `bridge clal-status` prints configured/enabled flags, sanitized source health,
   staleness and record counts. It never prints product identifiers, amounts,
   descriptions, credentials or the read token. Exit zero means an enabled,
@@ -118,6 +121,39 @@ selects the radio labelled `סמס` and verifies the single consent checkbox wit
 toggling controls that are already checked. The offline browser regression test
 uses synthetic HTML and never contacts Clal; run it with `CLAL_BROWSER_TEST=1`
 and `PUPPETEER_EXECUTABLE_PATH` pointing to the pinned container browser.
+
+## Optional session renewal
+
+Set `investments.sessionKeepAliveMinutes` to a value from 1 to 10 to check and
+renew the saved session on startup and at that interval. The default is 0
+(disabled). Five minutes leaves time to recover from a temporary failed request
+within the observed twenty-minute idle lifetime. This is best-effort renewal;
+provider revocation, absolute expiry and long service outages can still require
+assisted SMS login.
+
+The session maintainer uses Clal's own `KeepSessionAlive` request and verifies
+protected portfolio access before and after renewal. The expiration timer alone
+is not authentication evidence: a fresh unauthenticated browser can receive a
+positive timer after `KeepSessionAlive`. A failed protected account check must
+never be reported as an active login.
+
+Maintenance shares the collector's execution gate and cross-process profile lock.
+It skips a busy profile without changing health, and a collection due during
+maintenance waits for that short operation to finish. A scheduled collection
+blocked by another profile owner or an overlapping collection retries every
+thirty seconds for up to ten minutes. Duplicate schedule callbacks share that
+retry; shutdown cancels it. Provider errors and OTP requirements end the attempt
+without this busy retry. Confirmed expired
+authentication pauses scheduled browser attempts until successful assisted login
+or collection updates the separate session record. No automatic SMS is sent.
+
+Session state is stored separately in `investment_meta`, with check/renewal times,
+estimated expiry and a sanitized error code. `clal-status` and authenticated
+`GET /investments/v1/session-status` expose it, including expired/overdue flags.
+Maintenance never changes valuation dates, source collection timestamps,
+inventory completeness or financial records. Reading status never triggers a
+renewal. Shutdown aborts maintenance and closes its browser before releasing
+the profile or database.
 
 ## Profile lock recovery
 

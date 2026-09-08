@@ -1,7 +1,8 @@
 import {DatabaseSync} from 'node:sqlite';
 import {investmentActivityId, investmentProductId, investmentValuationId} from './ids.js';
-import {investmentFeedSchema, investmentSnapshotSchema, investmentSourceStateSchema} from './schema.js';
+import {clalSessionStateSchema, investmentFeedSchema, investmentSnapshotSchema, investmentSourceStateSchema} from './schema.js';
 import type {
+	ClalSessionState,
 	InvestmentFailure,
 	InvestmentFeed,
 	InvestmentImportSummary,
@@ -167,6 +168,28 @@ export function createInvestmentStore(filename: string): InvestmentStore {
 	};
 
 	return {
+		getSessionState(): ClalSessionState {
+			const row = db.prepare('SELECT value FROM investment_meta WHERE key = ?').get('session_state');
+			return row
+				? clalSessionStateSchema.parse(JSON.parse(String(row.value)))
+				: {status: 'unknown', lastCheckedAt: null, lastRenewedAt: null, expiresAt: null, errorCode: null};
+		},
+		setSessionState(state): void {
+			const validated = clalSessionStateSchema.parse(state);
+			db.exec('BEGIN IMMEDIATE');
+			try {
+				const row = db.prepare('SELECT value FROM investment_meta WHERE key = ?').get('session_state');
+				const previous = row ? clalSessionStateSchema.parse(JSON.parse(String(row.value))) : undefined;
+				if (!previous?.lastCheckedAt || (validated.lastCheckedAt && Date.parse(validated.lastCheckedAt) >= Date.parse(previous.lastCheckedAt))) {
+					db.prepare('INSERT OR REPLACE INTO investment_meta (key, value) VALUES (?, ?)').run('session_state', JSON.stringify(validated));
+				}
+
+				db.exec('COMMIT');
+			} catch (error) {
+				db.exec('ROLLBACK');
+				throw error;
+			}
+		},
 		applySnapshot(input): InvestmentImportSummary {
 			const snapshot = investmentSnapshotSchema.parse(input);
 			if (!snapshot.complete || !snapshot.inventoryComplete) {

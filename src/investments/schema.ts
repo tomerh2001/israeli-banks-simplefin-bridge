@@ -120,6 +120,15 @@ export const investmentSourceStateSchema = z.strictObject({
 	inventoryComplete: z.boolean(),
 });
 
+/** Session observations are independent of investment data collection and freshness. */
+export const clalSessionStateSchema = z.strictObject({
+	status: z.enum(['unknown', 'active', 'auth_required', 'error']),
+	lastCheckedAt: timestamp.nullable(),
+	lastRenewedAt: timestamp.nullable(),
+	expiresAt: timestamp.nullable(),
+	errorCode: investmentErrorCodeSchema.nullable(),
+});
+
 const dataShape = {
 	products: z.array(investmentProductSchema),
 	valuations: z.array(investmentValuationSchema),

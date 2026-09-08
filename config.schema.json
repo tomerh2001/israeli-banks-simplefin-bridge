@@ -227,6 +227,13 @@
           "minimum": 1,
           "maximum": 30,
           "description": "Maximum time allowed for one collection. Default 10 minutes."
+        },
+        "sessionKeepAliveMinutes": {
+          "default": 0,
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10,
+          "description": "Optional native session renewal interval, 1–10 minutes; 0 disables it (default). Never requests SMS or refreshes financial-data timestamps."
         }
       },
       "additionalProperties": false,

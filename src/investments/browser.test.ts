@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {afterEach, describe, expect, it} from 'vitest';
 import {readRuntimeEnv} from '../config.js';
-import {acquireClalProfile} from './browser.js';
+import {acquireClalProfile, ClalProfileBusyError} from './browser.js';
 
 const directories: string[] = [];
 function environment() {
@@ -41,7 +41,7 @@ describe('Clal profile ownership', () => {
 		const lease = acquireClalProfile(env);
 		const ownerFile = path.join(`${lease.profileDir}.collector-lock`, 'owner.json');
 		const owner = readFileSync(ownerFile, 'utf8');
-		expect(() => acquireClalProfile(env)).toThrow('COLLECTION_FAILED');
+		expect(() => acquireClalProfile(env)).toThrow(ClalProfileBusyError);
 		expect(readFileSync(ownerFile, 'utf8')).toBe(owner);
 		lease.release();
 	});
@@ -52,9 +52,16 @@ describe('Clal profile ownership', () => {
 		const ownerFile = path.join(`${lease.profileDir}.collector-lock`, 'owner.json');
 		const owner = JSON.parse(readFileSync(ownerFile, 'utf8')) as Record<string, unknown>;
 		writeFileSync(ownerFile, JSON.stringify({...owner, processId: 999_999_999, hostname: 'another-container'}));
-		expect(() => acquireClalProfile(env)).toThrow('COLLECTION_FAILED');
+		expect(() => acquireClalProfile(env)).toThrow(ClalProfileBusyError);
 		expect(existsSync(ownerFile)).toBe(true);
 		lease.release();
+	});
+
+	it('does not classify a broken profile path as contention', () => {
+		const env = environment();
+		writeFileSync(path.join(env.chromeDir, 'clal'), 'not a directory');
+		expect(() => acquireClalProfile(env)).not.toThrow(ClalProfileBusyError);
+		expect(() => acquireClalProfile(env)).toThrow();
 	});
 
 	it('does not remove a replacement lock belonging to another owner', () => {

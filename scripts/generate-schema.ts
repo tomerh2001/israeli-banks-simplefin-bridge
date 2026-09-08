@@ -47,6 +47,7 @@ const descriptions: Record<string, string> = {
 	'investments.schedule': 'Independent collection cron in the bridge timezone. Default 0 7 * * 1 (weekly Monday at 07:00).',
 	'investments.staleHours': 'Age after which investment data is stale. Default 192 hours.',
 	'investments.timeoutMinutes': 'Maximum time allowed for one collection. Default 10 minutes.',
+	'investments.sessionKeepAliveMinutes': 'Optional native session renewal interval, 1–10 minutes; 0 disables it (default). Never requests SMS or refreshes financial-data timestamps.',
 	'companies.enabled': 'Disabled companies are never scraped and never served. Default true.',
 	'companies.label': 'Human label used for SimpleFIN connection/account names and logs.',
 	'companies.kind': 'Default kind for every account of this company (checking, credit_card, savings, investment).',

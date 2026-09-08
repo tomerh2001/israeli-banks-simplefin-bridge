@@ -15,6 +15,13 @@ export class ClalCollectionError extends Error {
 	}
 }
 
+/** Existing ownership is a benign skipped attempt; other filesystem errors remain failures. */
+export class ClalProfileBusyError extends Error {
+	constructor() {
+		super('CLAL_PROFILE_BUSY');
+	}
+}
+
 export const CLAL_PORTFOLIO_URL = 'https://www.clalbit.co.il/portfolio/';
 export const CLAL_LOGIN_URL = 'https://www.clalbit.co.il/login/';
 
@@ -26,7 +33,11 @@ export function acquireClalProfile(env: RuntimeEnv): {profileDir: string; releas
 	const lock = `${profileDir}.collector-lock`;
 	try {
 		mkdirSync(lock, {mode: 0o700});
-	} catch {
+	} catch (error) {
+		if (error instanceof Error && 'code' in error && error.code === 'EEXIST') {
+			throw new ClalProfileBusyError();
+		}
+
 		throw new ClalCollectionError('COLLECTION_FAILED');
 	}
 
