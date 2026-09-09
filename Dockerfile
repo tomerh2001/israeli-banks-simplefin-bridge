@@ -69,7 +69,7 @@ COPY --chown=pptruser:pptruser src src
 RUN yarn build
 
 # The receiver is a separate program; it does not mirror messages into Matrix.
-FROM golang:1.26.6-bookworm AS messages
+FROM golang:1.27.1-bookworm AS messages
 WORKDIR /src
 COPY tools/google-messages-otp/go.mod tools/google-messages-otp/go.sum ./
 RUN go mod download
