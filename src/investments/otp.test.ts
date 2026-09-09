@@ -21,7 +21,7 @@ async function receiver(handler: (request: IncomingMessage, response: ServerResp
 	await new Promise<void>(resolve => {
 		server.listen(socketPath, resolve);
 	});
-	return {...createGoogleMessagesOtpSource(socketPath, provider), health: async () => readGoogleMessagesHealth(socketPath)};
+	return {...createGoogleMessagesOtpSource(socketPath, provider), health: async () => readGoogleMessagesHealth(socketPath, provider)};
 }
 
 function lease(lifetime = 180_000) {
@@ -75,11 +75,35 @@ describe('Google Messages OTP Unix socket client', () => {
 			json(response, 200, value);
 		});
 		expect(await source.health()).toEqual(expected);
-		expect(operations).toEqual(['GET /healthz']);
+		expect(operations).toEqual(['GET /v1/clal/healthz']);
+	});
+
+	it.each(['clal', 'best-invest'] as const)('reads only %s provider health without arming a lease', async provider => {
+		const operations: string[] = [];
+		const source = await receiver((request, response) => {
+			operations.push(`${request.method} ${request.url}`);
+			json(response, 200, {online: true, state: 'ready'});
+		}, provider);
+		expect(await source.health()).toEqual({ready: true, reason: 'ready'});
+		expect(operations).toEqual([`GET /v1/${provider}/healthz`]);
+	});
+
+	it.each([404, 503])('does not fall back to shared health when Best Invest is unavailable (%d)', async status => {
+		const operations: string[] = [];
+		const source = await receiver((request, response) => {
+			operations.push(`${request.method} ${request.url}`);
+			if (request.url === '/healthz') {
+				json(response, 200, {online: true, state: 'ready'});
+			} else {
+				json(response, status, {error: 'receiver_unavailable'});
+			}
+		}, 'best-invest');
+		expect(await source.health()).toEqual({ready: false, reason: 'unavailable'});
+		expect(operations).toEqual(['GET /v1/best-invest/healthz']);
 	});
 
 	it('returns safe unavailable health on socket failure and redirects', async () => {
-		expect(await readGoogleMessagesHealth('/nonexistent/synthetic-receiver.sock')).toEqual({ready: false, reason: 'unavailable'});
+		expect(await readGoogleMessagesHealth('/nonexistent/synthetic-receiver.sock', 'clal')).toEqual({ready: false, reason: 'unavailable'});
 		const source = await receiver((_request, response) => {
 			response.writeHead(302, {Location: 'https://example.invalid'}).end('private receiver details');
 		});

@@ -325,7 +325,7 @@ func serveReceiver(ctx context.Context, sessionPath, socketPath, sendersPath, be
 		if err := readPrivateJSON(bestInvestSendersPath, &bestInvestSenders); err != nil {
 			return err
 		}
-		if err := b.configureProvider(bestInvestProvider, bestInvestSenders, bestInvestMatcher()); err != nil {
+		if err := b.configureProvider(bestInvestProvider, bestInvestSenders, bestInvestCode); err != nil {
 			return err
 		}
 	}

@@ -174,10 +174,7 @@ func (b *broker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.URL.Path == "/healthz" && r.Method == "GET" {
-		b.mu.Lock()
-		state, online := b.health, b.online
-		b.mu.Unlock()
-		reply(w, 200, map[string]any{"online": online, "state": state})
+		b.replyHealth(w)
 		return
 	}
 	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
@@ -188,6 +185,10 @@ func (b *broker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	provider := parts[1]
 	if !b.providerEnabled(provider) {
 		reply(w, 503, map[string]string{"error": "receiver_unavailable"})
+		return
+	}
+	if len(parts) == 3 && parts[2] == "healthz" && r.Method == "GET" {
+		b.replyHealth(w)
 		return
 	}
 	if len(parts) == 3 && parts[2] == "arm" && r.Method == "POST" {
@@ -219,6 +220,15 @@ func (b *broker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	reply(w, 404, map[string]string{"error": "not_found"})
+}
+
+// Provider routes reach this only after verifying their configured sender and
+// matcher. Reading health never acquires a lease or asks the phone for a code.
+func (b *broker) replyHealth(w http.ResponseWriter) {
+	b.mu.Lock()
+	state, online := b.health, b.online
+	b.mu.Unlock()
+	reply(w, 200, map[string]any{"online": online, "state": state})
 }
 
 func reply(w http.ResponseWriter, status int, value any) {

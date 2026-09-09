@@ -75,9 +75,20 @@ fees. Missing policy data or failed reconciliation cannot replace saved values.
 ## Authentication and operations
 
 The existing Google Messages receiver has isolated `/v1/best-invest` routes.
-An actual Best Invest SMS template and exact sender identity must be verified
-before automatic SMS can be enabled. The route fails closed while its production
-matcher is unverified; setting a socket or sender file alone does not enable it.
+A controlled login verified the Hebrew one-time-password message and its
+`@customers.hcsra.co.il` WebOTP footer. Both six-digit codes must agree, and the
+actual sender must match the separate private Best Invest sender allowlist.
+
+To enable automatic SMS, add `--best-invest-senders-file` with that private JSON
+array to the existing receiver command, and set
+`bestInvest.googleMessagesOtpSocket` to its private Unix socket. Use the mobile
+number registered with Hachshara in `credentials.phone`. A missing sender file
+keeps the Best Invest route unavailable even when Clal is connected.
+`GET /v1/best-invest/healthz` verifies provider configuration and receiver
+liveness without requesting an SMS or reserving the shared lease. Source control
+status uses this provider health result and the independent Best Invest request
+allowance to report automatic OTP readiness.
+
 Email onboarding uses an operator-provided code; it does not grant the deployed
 collector access to a Gmail connector running in another application.
 
