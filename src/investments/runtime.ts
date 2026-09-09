@@ -7,7 +7,7 @@ import type {RuntimeEnv, SecretsResolver} from '../types.js';
 import {ClalCollectionError, ClalProfileBusyError, type ClalBrowserOptions} from './browser.js';
 import type {InvestmentConfig} from './config.js';
 import {createInvestmentControlRouter, type InvestmentControlStatus, type InvestmentRefreshResult} from './control.js';
-import {readGoogleMessagesHealth, type GoogleMessagesHealth} from './otp.js';
+import {readGoogleMessagesHealth, type GoogleMessagesHealth, type GoogleMessagesProvider} from './otp.js';
 import {createInvestmentRouter, getClalSessionStatus} from './router.js';
 import {createInvestmentStore} from './store.js';
 import type {ClalSessionState, InvestmentProvider, InvestmentStore} from './types.js';
@@ -30,8 +30,8 @@ export type InvestmentRuntimeOptions = Omit<InvestmentCollectionContext, 'store'
 	collect?: InvestmentCollector;
 	/** Renews an existing session and returns its verified remaining lifetime, without requesting an SMS. */
 	maintainSession?: (options: ClalBrowserOptions) => Promise<number>;
-	/** Read-only receiver liveness; no login or SMS side effects. */
-	otpHealth?: (socketPath: string) => Promise<GoogleMessagesHealth>;
+	/** Read-only provider readiness; no login or SMS side effects. */
+	otpHealth?: (socketPath: string, provider: GoogleMessagesProvider) => Promise<GoogleMessagesHealth>;
 	now?: () => Date;
 	provider?: InvestmentProvider;
 };
@@ -286,10 +286,11 @@ export async function createInvestmentRuntime(options: InvestmentRuntimeOptions)
 		}
 
 		const socketPath = config.googleMessagesOtpSocket;
-		// Shared socket liveness does not establish verified Best Invest OTP support.
-		const health = socketPath && !isBestInvest
-			? await (options.otpHealth ?? readGoogleMessagesHealth)(socketPath)
-			: {ready: false, reason: socketPath ? 'unavailable' as const : 'not_configured' as const};
+		// The provider route verifies its own configured sender and matcher before
+		// reporting shared receiver liveness.
+		const health = socketPath
+			? await (options.otpHealth ?? readGoogleMessagesHealth)(socketPath, isBestInvest ? 'best-invest' : 'clal')
+			: {ready: false, reason: 'not_configured' as const};
 		const observedAt = now();
 		const nextAllowedAt = store.getAutomaticSmsNextAllowedAt(observedAt.toISOString());
 		let description: InvestmentControlStatus['schedule']['description'] = null;

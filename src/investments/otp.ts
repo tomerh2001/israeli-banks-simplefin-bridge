@@ -73,15 +73,16 @@ async function receiverRequest(socketPath: string, method: 'GET' | 'POST' | 'DEL
 
 const receiverStates = ['ready', 'connecting', 'disconnected', 'inactive', 'phone_unavailable', 'phone_syncing', 'reauth_required'] as const;
 export type GoogleMessagesHealth = {ready: boolean; reason: typeof receiverStates[number] | 'unavailable'};
+export type GoogleMessagesProvider = 'clal' | 'best-invest';
 
-/** Reads only receiver liveness. Never arms a lease, lists messages, or requests an SMS. */
-export async function readGoogleMessagesHealth(socketPath: string): Promise<GoogleMessagesHealth> {
+/** Reads configured provider readiness. Never arms a lease, lists messages, or requests an SMS. */
+export async function readGoogleMessagesHealth(socketPath: string, provider: GoogleMessagesProvider): Promise<GoogleMessagesHealth> {
 	try {
 		if (!path.isAbsolute(socketPath) || socketPath.includes('\0')) {
 			return {ready: false, reason: 'unavailable'};
 		}
 
-		const value = objectResponse(await receiverRequest(socketPath, 'GET', '/healthz', 3000), 200, ['online', 'state']);
+		const value = objectResponse(await receiverRequest(socketPath, 'GET', `/v1/${provider}/healthz`, 3000), 200, ['online', 'state']);
 		const reason = receiverStates.find(state => state === value.state) ?? 'unavailable';
 		const ready = value.online === true && reason === 'ready';
 		return {ready, reason: !ready && reason === 'ready' ? 'unavailable' : reason};
@@ -126,7 +127,7 @@ function timestamp(value: unknown): number {
 }
 
 /** Google Messages stays in a separate receiver; this client cannot list an inbox or send SMS. */
-export function createGoogleMessagesOtpSource(socketPath: string, provider: 'clal' | 'best-invest' = 'clal'): ClalOtpSource {
+export function createGoogleMessagesOtpSource(socketPath: string, provider: GoogleMessagesProvider = 'clal'): ClalOtpSource {
 	if (!path.isAbsolute(socketPath) || socketPath.includes('\0')) {
 		throw new ClalCollectionError('INVALID_RESPONSE');
 	}

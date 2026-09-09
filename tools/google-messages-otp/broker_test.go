@@ -190,6 +190,21 @@ func TestCandidatesRejectBackfillOutgoingMissingTimestampAndMMS(t *testing.T) {
 	}
 }
 
+func TestBestInvestCandidateAcceptsTheTwoMatchingCodeCopies(t *testing.T) {
+	m := &libgm.WrappedMessage{Message: &gmproto.Message{
+		MessageID: "synthetic-best-message", Timestamp: time.Now().UnixMicro(), Type: 1,
+		MessageStatus: &gmproto.MessageStatus{Status: gmproto.MessageStatusType_INCOMING_COMPLETE},
+		MessageInfo:   []*gmproto.MessageInfo{{Data: &gmproto.MessageInfo_MessageContent{MessageContent: &gmproto.MessageContent{Content: bestInvestText}}}},
+	}}
+	if code, _, ok := candidate(m, bestInvestCode); !ok || code != "123456" {
+		t.Fatal("the incoming SMS gate rejected matching body and WebOTP codes")
+	}
+	m.MessageInfo[0].GetMessageContent().Content = strings.Replace(bestInvestText, "#123456", "#654321", 1)
+	if _, _, ok := candidate(m, bestInvestCode); ok {
+		t.Fatal("the incoming SMS gate accepted conflicting body and WebOTP codes")
+	}
+}
+
 func TestStateFileModeAndSessionExclusion(t *testing.T) {
 	dir := t.TempDir()
 	_ = os.Chmod(dir, 0700)

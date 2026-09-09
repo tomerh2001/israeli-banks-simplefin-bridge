@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -39,10 +40,20 @@ func (b *broker) configureProvider(provider string, senders []string, code func(
 	return nil
 }
 
-// Fail closed until a controlled Best Invest SMS establishes its exact template.
-// A sender allowlist alone cannot enable this provider or reuse Clal's matcher.
-func bestInvestMatcher() func(string) string {
-	return nil
+var bestInvestTemplate = regexp.MustCompile(`^סיסמה חד פעמית לכניסה לאתר היא ([0-9]{6})[ \t]*\n(?:[ \t]*\n)*@customers\.hcsra\.co\.il #([0-9]{6})$`)
+
+// A controlled login verified this body and WebOTP origin. Both copies must
+// agree, and the caller must independently verify the configured exact sender.
+func bestInvestCode(text string) string {
+	if len(text) > 4096 {
+		return ""
+	}
+	text = strings.Trim(strings.ReplaceAll(text, "\r\n", "\n"), " \t\n")
+	match := bestInvestTemplate.FindStringSubmatch(text)
+	if len(match) != 3 || match[1] != match[2] {
+		return ""
+	}
+	return match[1]
 }
 
 func (b *broker) providerEnabled(provider string) bool {

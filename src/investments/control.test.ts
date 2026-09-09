@@ -158,6 +158,7 @@ describe('read-only source health and scheduling', () => {
 			session: {status: 'unknown', verifiedActive: false},
 		});
 		expect(result.schedule.description).toContain('07:00');
+		expect(otpHealth).toHaveBeenCalledWith('/private/receiver.sock', 'clal');
 		expect(JSON.stringify(result)).not.toMatch(/private|op:\/\/|capability|products|activities/);
 		expect(collect).not.toHaveBeenCalled();
 		expect(runtime.store!.consumeAutomaticSmsAttempt(currentTime)).toBe(true);
@@ -236,18 +237,22 @@ describe('asynchronous bounded collection requests', () => {
 });
 
 describe('provider control isolation in one application', () => {
-	it('keeps both providers routed independently and does not infer Best Invest OTP readiness', async () => {
+	it('keeps provider routes, receiver readiness, and automatic SMS budgets independent', async () => {
 		const clalCollect = vi.fn(async () => 'ok' as const);
 		const bestCollect = vi.fn(async () => 'ok' as const);
+		const socketPath = '/synthetic/shared-receiver.sock';
+		const otpHealth = vi.fn<NonNullable<InvestmentRuntimeOptions['otpHealth']>>(async (_socket, provider) => provider === 'best-invest'
+			? {ready: false, reason: 'unavailable'}
+			: {ready: true, reason: 'ready'});
 		const bestReadToken = 'synthetic-best-read-capability-0123456789';
 		const bestControlToken = 'synthetic-best-control-capability-0123456789';
 		const bestAuthorization = {authorization: `Bearer ${bestControlToken}`};
-		const clal = await start({collect: clalCollect});
+		const clal = await start({collect: clalCollect, config: {...config, googleMessagesOtpSocket: socketPath}, otpHealth});
 		const best = await start({
 			provider: 'hachshara_best_invest', collect: bestCollect,
-			config: {...config, readToken: bestReadToken, controlToken: bestControlToken, googleMessagesOtpSocket: '/synthetic/shared-receiver.sock'},
+			config: {...config, readToken: bestReadToken, controlToken: bestControlToken, googleMessagesOtpSocket: socketPath},
 			secrets: {resolve: async reference => reference, resolveAll: async values => values},
-			otpHealth: async () => ({ready: true, reason: 'ready'}),
+			otpHealth,
 		});
 		const app = new Hono();
 		app.route('/', clal.router);
@@ -256,13 +261,23 @@ describe('provider control isolation in one application', () => {
 		const bestRefresh = '/investments/best-invest/v1/control/refresh';
 		const clalResponse = await app.request(statusUrl, {headers: authorization});
 		expect(clalResponse.status).toBe(200);
-		expect(await clalResponse.json()).toMatchObject({source: {provider: 'clal'}});
+		expect(await clalResponse.json()).toMatchObject({source: {provider: 'clal'}, automaticOtp: {enabled: true, ready: true, reason: 'ready'}});
 		const bestResponse = await app.request(bestStatus, {headers: bestAuthorization});
 		expect(bestResponse.status).toBe(200);
 		expect(await bestResponse.json()).toMatchObject({
 			source: {provider: 'hachshara_best_invest'},
 			automaticOtp: {enabled: true, ready: false, reason: 'unavailable'},
 		});
+		expect(otpHealth).toHaveBeenCalledWith(socketPath, 'clal');
+		expect(otpHealth).toHaveBeenCalledWith(socketPath, 'best-invest');
+		otpHealth.mockResolvedValue({ready: true, reason: 'ready'});
+		const readyResponse = await app.request(bestStatus, {headers: bestAuthorization});
+		expect(await readyResponse.json()).toMatchObject({automaticOtp: {enabled: true, ready: true, reason: 'ready', nextAllowedAt: null}});
+		expect(best.store!.consumeAutomaticSmsAttempt(currentTime)).toBe(true);
+		expect(best.store!.consumeAutomaticSmsAttempt(currentTime)).toBe(true);
+		const limitedResponse = await app.request(bestStatus, {headers: bestAuthorization});
+		expect(await limitedResponse.json()).toMatchObject({automaticOtp: {enabled: true, ready: false, reason: 'rate_limited', nextAllowedAt: '2026-09-10T06:00:00.000Z'}});
+		expect(await statusPart(clal, 'automaticOtp')).toEqual({enabled: true, ready: true, reason: 'ready', nextAllowedAt: null});
 		expect(await responseStatus(app.request(bestStatus, {headers: authorization}))).toBe(403);
 		expect(await responseStatus(app.request(bestRefresh, {method: 'POST', headers: {...bestAuthorization, ...providerHeader}}))).toBe(409);
 		expect(await responseStatus(app.request(refreshUrl, {method: 'POST', headers: {...authorization, 'x-investment-provider': 'hachshara_best_invest'}}))).toBe(409);

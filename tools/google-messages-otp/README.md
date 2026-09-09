@@ -69,6 +69,7 @@ the receiver is ready.
 | `POST /v1/clal/arm` with `{}` | 201: `requestId`, `armedAt`, `expiresAt` |
 | `POST /v1/clal/{requestId}/wait` with `{}` | Up to 20 seconds: 200 with `requestId`, `code`, `expiresAt`, or 202 pending |
 | `DELETE /v1/clal/{requestId}` | 204, idempotent cancellation |
+| `GET /v1/clal/healthz` | Configured Clal matcher and sender required; `online` and sanitized `state` |
 | `GET /healthz` | `online` and sanitized `state` |
 
 The caller arms immediately before its single Clal SMS request. The receiver
@@ -100,7 +101,8 @@ Clal login, so the bridge must also hold its Clal profile lock throughout login.
 Best Invest has separate routes:
 `POST /v1/best-invest/arm`,
 `POST /v1/best-invest/{requestId}/wait`, and
-`DELETE /v1/best-invest/{requestId}`.
+`DELETE /v1/best-invest/{requestId}`, and
+`GET /v1/best-invest/healthz`.
 Their response formats match the Clal routes.
 
 An optional `--best-invest-senders-file /state/best-invest-senders.json` supplies
@@ -108,11 +110,13 @@ a private JSON array of exact sender addresses verified through a controlled
 Best Invest login. It is separate from the required Clal sender file. Missing,
 invalid or unverified sender configuration cannot fall back to Clal matching.
 
-Provider availability additionally requires a verified exact SMS template.
-Until a controlled Best Invest SMS supplies that evidence, the Best Invest
-matcher remains disabled in source and its routes return 503, even when the
-sender file is supplied. Synthetic test templates are never installed in the
-running receiver.
+A controlled Best Invest login verified the Hebrew message
+`סיסמה חד פעמית לכניסה לאתר היא` followed by six ASCII digits, blank-line
+whitespace, and the exact WebOTP footer `@customers.hcsra.co.il #` with the same
+six digits. The matcher requires both copies to agree and rejects extra text,
+other domains, or additional codes. The source contains this verified grammar;
+test codes and sender identities are synthetic. The private exact sender
+allowlist is still required before the Best Invest routes become available.
 
 There is one global lease across providers. A Best Invest lease prevents a
 simultaneous Clal arm and vice versa. The active lease selects the only template
@@ -122,8 +126,11 @@ route has no effect. The global consumed-message hashes also prevent a source
 message from being delivered again through another provider.
 
 Clal's existing flags, routes, template and pairing process remain unchanged.
-The health endpoint describes the shared connection; callers must successfully
-arm their own provider before requesting an SMS.
+The shared `/healthz` endpoint describes the Google Messages connection.
+Provider health routes additionally require that provider's exact sender
+configuration and matcher; an unavailable provider returns 503. Reading health
+does not reserve or release a lease, contact the phone, or read messages.
+Callers must still successfully arm their own provider before requesting an SMS.
 
 ## Verified upstream entry points
 
