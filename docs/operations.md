@@ -147,6 +147,45 @@ Restoring: stop, replace `data/`, restore the configured runtime ownership/ACLs,
 `meta.id_scheme_version` than the running image is refused at startup; that is deliberate, see
 [architecture.md](./architecture.md#id-scheme-id_scheme_version--1).
 
+## Private storage on TrueNAS NFSv4 datasets
+
+On September 10, 2026, directories created with mode 0700 inherited named `apps`
+and `builtin_users` access and projected mode 0770. The native Hapoalim archive
+seeder's owner/mode guard refused those directories. Applying `chmod 0700` did
+not remove the named ACL grants. The seeder checks projected mode and ownership;
+effective ACL access needs a separate inspection.
+
+Inspect ACLs and effective permissions before storing financial evidence. Back
+up the original ACLs privately, then use TrueNAS `filesystem.setacl` on each
+verified private parent with a nonrecursive change, preserving its UID/GID. The
+audited correction retained inheritable `owner@` full control plus an explicit
+inheritable full-control entry for the authorized operator UID 3000. It removed inherited
+named access from the selected parents. This is a scoped repair pattern, not an
+instruction to replace ACLs on every service dataset.
+
+The bridge data root also needed that restricted inheritance: SQLite creates
+new database, WAL and SHM files directly beneath it. Fixing only a migration or
+onboarding subdirectory would leave future root-level sidecars exposed. The
+correction covered the bridge data root and private parents without recursively
+changing children or ownership; the retired PostgreSQL files retained UID 999.
+Existing descendants need their own inspection because a nonrecursive parent
+change does not rewrite their ACLs.
+
+Verify effective `READ_DATA` permissions for principals outside the service and
+authorized operator, rather than rejecting an ACL solely because it contains an
+`everyone@` entry. Metadata or traverse-only permissions are distinct from file
+data access. Verify the actual database and newly created WAL/SHM ACLs and
+ownership, then perform an application read as the configured service UID/GID.
+Keep original ACL backups and detailed permission evidence in the restricted
+data directory; repository documentation contains only aggregate findings.
+
+For private operator helpers, pass one JSON object containing `script` and
+`payload` on standard input to a short fixed bootstrap. Embedding a multiline
+Python program in `sudo ... python -c` arguments was intercepted by the host's
+command handling. The fixed bootstrap avoids that argv boundary and keeps
+private payloads out of process arguments and logs. Keep the bootstrap local and
+reviewed.
+
 ## Recovering history from retired importers
 
 A successful scrape establishes what the source returned, not complete account history. A requested start date
@@ -155,7 +194,8 @@ date. Check both dates when comparing archive coverage with a fresh scrape. A da
 does not establish the last successful bank refresh or prove that a gap contains no activity.
 
 Keep extracts, comparison scripts, raw records, checksums and the review manifest outside the repository. On
-this host, use `/mnt/Pool/Services/Data/israeli-banks-bridge/migration/` with mode 0700 and files mode 0600.
+this host, use `/mnt/Pool/Services/Data/israeli-banks-bridge/migration/` with mode 0700 and files mode 0600,
+plus the [effective ACL checks above](#private-storage-on-truenas-nfsv4-datasets).
 Share aggregate counts and date ranges in operational documentation; keep account identifiers, descriptions,
 amounts and credentials in the private artifacts.
 
