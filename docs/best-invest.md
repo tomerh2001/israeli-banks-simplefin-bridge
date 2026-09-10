@@ -138,3 +138,12 @@ After confirming the native collection allowance, cooldown and date boundary,
 permit at most one bounded recovery sequence for the failed collection. Never
 resend an SMS after failure. Verify persisted source success and timestamps;
 HTTP acceptance or a CLI exit alone does not establish a successful collection.
+
+On September 10, 2026, archiving three verified-stale Singleton links restored
+browser startup. The permitted collection made one SMS request and finished at
+17:10:25 UTC with `partial` / `INCOMPLETE_RESPONSE`. The source rejected that
+snapshot and retained the previous values and last success of September 9,
+19:32:36.384 UTC. No resend or further provider retry was permitted in that
+recovery sequence. The rejected raw response was not retained, so the incomplete
+provider data was not identified; browser recovery did not establish a successful
+financial collection.
