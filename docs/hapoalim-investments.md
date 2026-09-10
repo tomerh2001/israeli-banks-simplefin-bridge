@@ -70,14 +70,13 @@ records; they do not prove a current zero balance or a successful bank collectio
 
 ## Integration boundaries
 
-Hapoalim is not in the deployed investment feed provider allowlist. Its live
-collector requires a distinct provider identity, scoped cached endpoint, read
-token selection, and independent configured control capability. In Securo these
-touch the investment feed schema, provider routing, configuration/registration,
-token connection copy, and matching provider/control tests. Preserve the existing
-Clal and Best Invest endpoint identity guards. Backend and worker configuration
-must agree. A separate connection must adopt the same verified Hapoalim product
-identity on future syncs rather than minting a duplicate account.
+The Hapoalim integration has a distinct provider identity, scoped cached endpoint
+and read token selection. Its reserved control capability does not enable a
+separate bank refresh. Securo supports this provider in its feed schema, routing,
+configuration and token connection flow. Preserve the existing Clal and Best
+Invest endpoint identity guards. Backend and worker configuration must agree.
+A separate connection adopts the same verified Hapoalim product identity on
+future syncs rather than minting a duplicate account.
 
 The current feed can represent one investment product with historical valuations
 and unclassified cash activity, with `currentValuationId=null` until a current
@@ -87,13 +86,14 @@ later live zero must be an explicit source valuation, not inferred from empty
 or incomplete collection results. Never promote an archived valuation into the
 current slot to make onboarding appear complete.
 
-For actual securities collection, first verify the bank's available account,
-position and execution fields. The savings feed currently has no normalized
-security identifiers, trade quantities/prices, dividends, taxes, or securities
-corporate actions. It also requires activity/track currency to match the product
-currency. Preserve security and original-currency details in a deliberate
-contract extension if the live bank supplies them; do not reduce mixed-currency
-trades to guessed ILS values or use account cash movements to manufacture orders.
+The typed `executions` extension carries security identifiers, quantities,
+prices, trade and settlement dates, source activity labels and original cash
+currencies separately from the pension activity ledger. It does not infer
+positions, taxes, cash signs or current account value. The bank's `View.Account`
+current portfolio shape remains unverified. Activity and track currencies still
+match their product; execution trade and settlement currencies remain independent.
+Do not reduce mixed-currency trades to guessed ILS values or use account cash
+movements to manufacture orders.
 
 Securo's separate `AssetTransaction` ledger accepts only buys and sells and
 derives positions, average cost and realized gain from them. It is unsuitable for
@@ -162,6 +162,14 @@ Executions never become ordinary cash income or spending, and foreign trade and
 settlement currencies remain separate. Duplicate natural identities or truncated
 history refuse the snapshot rather than silently dropping possible fills.
 
+Private portfolio and history captures store a `{rawBody: string}` envelope with
+the exact original response text before decoding. The JSON decoder preserves the
+original numeric tokens for `NV`, `TradePrice`, `NetValueTradeCurrency` and
+`NetValueSettlementCurrency` through the reviver's `context.source`. This avoids
+binary floating-point rounding before decimal validation. Other fields retain
+their JSON types, including numeric error codes. A runtime without source-token
+support refuses those financial values rather than rounding them.
+
 A verified history response may be applied with incomplete portfolio inventory.
 That advances only `lastAttemptAt`, marks the source `partial`, and retains its
 previous `lastSuccessAt`. A current portfolio value remains unavailable until
@@ -196,6 +204,33 @@ product has `currentValuationId: null`. Use
 `bridge hapoalim-investments-status` to inspect aggregate cached status without
 triggering collection. Verify SQLite/WAL/SHM ownership and an actual application
 read after deployment or maintenance.
+
+### Verified onboarding — September 10, 2026
+
+The native seed successfully stored the 16 surviving valuations dated April
+2–27, 2026 with their original identities, financial amounts and dates. Current
+value remains unknown, and provider attempt/success timestamps remain unset.
+The older 52 transaction records were not imported. Securo's native onboarding
+created one investment asset and group, imported the same 16 exact historical
+values, and created no activities or executions. Current balance and source
+attempt/success timestamps remain unset. Repeating the cached sync was
+idempotent, and preexisting financial records and policy settings were unchanged.
+The worker and scheduler were restored on the published Securo image, and the
+worker answered its health check.
+
+Archive observation timestamps crossing Python and JavaScript need identical
+precision. The native JavaScript seed canonicalizes them with
+`Date.toISOString()`. Private verification must normalize its expected
+observation timestamp to that same UTC representation, truncating to
+milliseconds. Keep the original manifest and its full observation precision
+unchanged; no transport copy is required. This comparison normalization applies
+only to observation timestamps. Financial values and valuation dates are
+unchanged, and archive observation never establishes bank freshness.
+
+The native seeder requires private directories. On this TrueNAS host,
+mode 0700 alone did not remove inherited named ACL access. Follow the
+[NFSv4 storage checks](operations.md#private-storage-on-truenas-nfsv4-datasets)
+before preparing evidence, backups or the investment database.
 
 ## September 10 diagnostic boundary
 
@@ -248,3 +283,5 @@ optional execution collection on all investment feeds, while the older Securo
 strict schema rejects that field. The updated consumer accepts older feeds with
 an empty execution default, allowing this ordered rollout without a service-code
 hot patch. Pull only the reviewed, merged and CI-published moving images.
+The Google Messages receiver is unchanged by this rollout. Hapoalim collection
+continues to share its normal bank session and requires no new OTP receiver.
