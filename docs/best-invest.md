@@ -102,8 +102,39 @@ the dedicated `chrome/best-invest` profile and restored to the exact portal
 origin. Keep that directory private. On NFSv4 datasets, explicitly apply file
 permissions after creation because inherited ACLs may override creation modes.
 
-If an interrupted process leaves `best-invest.collector-lock`, first confirm no
-collector or browser still owns that profile, then remove only that stale lock.
 Never share this profile with Clal or run a second Google Messages receiver on
 the same pairing. The receiver keeps one global OTP lease and each collector
 has its own persistent limit of two automatic requests per rolling day.
+
+### Fast collection failures and stale Chromium locks
+
+An immediate `COLLECTION_FAILED` can mean Chromium could not open its profile,
+including stale `SingletonLock`, `SingletonCookie` or `SingletonSocket` symlinks
+left with a previous container hostname. An old hostname alone does not prove
+that a lock is stale. Inspect links with `lstat` and `readlink`: `existsSync`
+follows the target and returns false for a dangling link that still blocks
+Chromium.
+
+An unset `DISPLAY` in a fresh `docker exec` process does not establish that the
+running collector lacks a display. The entrypoint starts the server through
+`xvfb-run`; inspect only `DISPLAY` in the actual Node process environment and
+confirm its Xvfb process. Do not dump the whole environment into logs.
+
+Before archiving locks, verify the authenticated live control status reports
+collection idle, prove no host process or process in any container with access
+to the profile owns it, and establish that the shared OTP lease is idle. Include
+containers with parent-directory mounts in that ownership check. Receiver health
+alone does not expose the lease, and a separate status CLI cannot establish the
+serving process's collection state.
+
+Back up affected source state and lock metadata privately as the service UID/GID.
+Only after those checks, archive the three proven-stale Singleton symlinks;
+preserve the rest of the profile, saved session, financial records and attempt
+counters. If `best-invest.collector-lock` is also present, investigate its owner
+separately; a stale Singleton link does not authorize clearing that guard. Do not
+add automatic lock deletion, hot-patch the browser code or refund bank attempts.
+
+After confirming the native collection allowance, cooldown and date boundary,
+permit at most one bounded recovery sequence for the failed collection. Never
+resend an SMS after failure. Verify persisted source success and timestamps;
+HTTP acceptance or a CLI exit alone does not establish a successful collection.
