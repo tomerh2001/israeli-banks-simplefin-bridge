@@ -23,9 +23,13 @@ export type Command =
 	| 'best-invest-login'
 	| 'best-invest-sync'
 	| 'best-invest-status'
+	| 'hapoalim-investments-seed'
+	| 'hapoalim-investments-status'
 	| 'serve';
 
-export type OptionName = 'config' | 'data-dir' | 'verbose' | 'help' | 'from' | 'to' | 'force' | 'label' | 'rotate' | 'account' | 'manual-otp' | 'email';
+export type OptionName =
+	| 'config' | 'data-dir' | 'verbose' | 'help' | 'from' | 'to' | 'force' | 'label' | 'rotate' | 'account'
+	| 'manual-otp' | 'email' | 'archive' | 'source' | 'provider-product-id' | 'backup-dir';
 
 export type ParsedArgs = {
 	command: Command;
@@ -50,6 +54,10 @@ const OPTIONS = {
 	account: {type: 'string', multiple: true},
 	'manual-otp': {type: 'boolean'},
 	email: {type: 'boolean'},
+	archive: {type: 'string'},
+	source: {type: 'string'},
+	'provider-product-id': {type: 'string'},
+	'backup-dir': {type: 'string'},
 } satisfies ParseArgsConfig['options'];
 
 const GLOBAL_OPTIONS: OptionName[] = ['config', 'data-dir', 'verbose', 'help'];
@@ -73,6 +81,8 @@ const COMMANDS: Record<Command, {options: OptionName[]; positional?: 'company'}>
 	'best-invest-login': {options: ['manual-otp', 'email']},
 	'best-invest-sync': {options: []},
 	'best-invest-status': {options: []},
+	'hapoalim-investments-seed': {options: ['archive', 'source', 'provider-product-id', 'backup-dir']},
+	'hapoalim-investments-status': {options: []},
 	serve: {options: []},
 };
 
@@ -105,6 +115,11 @@ Commands:
                           --email sends the code to configured credentials.email and reads private stdin.
   best-invest-sync        Refresh Best Invest using its saved session or configured OTP receiver.
   best-invest-status      Print Best Invest health and record counts as JSON.
+  hapoalim-investments-status
+                          Read cached Hapoalim investment state without a bank login.
+  hapoalim-investments-seed --archive <review.json> --source <export.json>
+                          --provider-product-id <bank-branch-account:securities> --backup-dir <private-dir>
+                          Append reviewed historical valuations after a native backup. No bank requests.
   serve                   Start the SimpleFIN server and the scheduler (same as node dist/index.js).
 
 Global options:

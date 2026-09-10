@@ -29,3 +29,14 @@ export const bestInvestConfigSchema = investmentConfigSchema.extend({
 });
 
 export type BestInvestConfig = z.infer<typeof bestInvestConfigSchema>;
+
+/** Collected during the existing Hapoalim login; never has a separate schedule or credentials. */
+export const hapoalimInvestmentsConfigSchema = z.strictObject({
+	enabled: z.boolean().default(false),
+	readToken: z.string().default(''),
+	controlToken: z.string().default(''),
+	staleHours: z.number().int().min(1).default(30),
+	historyStartDate: z.iso.date().default('2023-01-01'),
+});
+
+export type HapoalimInvestmentsConfig = z.infer<typeof hapoalimInvestmentsConfigSchema>;

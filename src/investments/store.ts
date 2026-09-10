@@ -1,6 +1,6 @@
-import {DatabaseSync} from 'node:sqlite';
+import {backup, DatabaseSync} from 'node:sqlite';
 import {z} from 'zod';
-import {investmentActivityId, investmentProductId, investmentValuationId} from './ids.js';
+import {investmentActivityId, investmentExecutionId, investmentProductId, investmentValuationId} from './ids.js';
 import {clalSessionStateSchema, investmentFeedSchema, investmentSnapshotSchema, investmentSourceStateSchema} from './schema.js';
 import type {
 	ClalSessionState,
@@ -14,9 +14,9 @@ import type {
 	InvestmentStore,
 } from './types.js';
 
-const recordKinds = ['products', 'valuations', 'activities', 'tracks'] as const;
+const recordKinds = ['products', 'valuations', 'activities', 'tracks', 'executions'] as const;
 type RecordKind = typeof recordKinds[number];
-type InvestmentRecord = InvestmentSnapshot[RecordKind][number];
+type InvestmentRecord = NonNullable<InvestmentSnapshot[RecordKind]>[number];
 
 function initialState(provider: InvestmentProvider): InvestmentSourceState {
 	return {
@@ -28,7 +28,7 @@ function initialState(provider: InvestmentProvider): InvestmentSourceState {
 function validateRelations(snapshot: InvestmentSnapshot, provider: InvestmentProvider): void {
 	const products = new Map(snapshot.products.map(product => [product.id, product]));
 	for (const kind of recordKinds) {
-		const identifiers = snapshot[kind].map(row => row.id);
+		const identifiers = (snapshot[kind] ?? []).map(row => row.id);
 		if (new Set(identifiers).size !== identifiers.length) {
 			throw new Error(`Duplicate investment ${kind} identities`);
 		}
@@ -56,7 +56,14 @@ function validateRelations(snapshot: InvestmentSnapshot, provider: InvestmentPro
 	}
 
 	for (const row of snapshot.valuations) {
-		if (row.id !== investmentValuationId(row.productId, row.asOf)) {
+		const archived = row.provenance;
+		if (archived) {
+			if (provider !== 'hapoalim' || row.id !== `sure:entry:${archived.sourceEntryId}` || row.asOf === null
+				|| row.amount !== archived.sourceAmount || row.observedAt !== archived.archiveObservedAt
+				|| products.get(row.productId)?.currentValuationId === row.id) {
+				throw new Error('Archive valuation must preserve its identity, value and historical provenance');
+			}
+		} else if (row.id !== investmentValuationId(row.productId, row.asOf)) {
 			throw new Error('Investment valuation identity does not match its date');
 		}
 	}
@@ -70,6 +77,12 @@ function validateRelations(snapshot: InvestmentSnapshot, provider: InvestmentPro
 	for (const row of snapshot.tracks) {
 		if (!row.id.startsWith(`${row.productId}:track:`)) {
 			throw new Error('Investment track identity does not match its product');
+		}
+	}
+
+	for (const row of snapshot.executions ?? []) {
+		if (provider !== 'hapoalim' || !products.has(row.productId) || row.id !== investmentExecutionId(row.productId, row.sourceId)) {
+			throw new Error('Investment execution identity does not match its provider product');
 		}
 	}
 }
@@ -106,6 +119,10 @@ export function createInvestmentStore(filename: string, provider: InvestmentProv
 			replaced_at TEXT NOT NULL,
 			json TEXT NOT NULL
 		);
+		CREATE TABLE IF NOT EXISTS investment_archive_evidence (
+			sha256 TEXT PRIMARY KEY,
+			json TEXT NOT NULL
+		);
 		INSERT OR IGNORE INTO investment_meta (key, value) VALUES ('schema_version', '1');
 	`);
 
@@ -123,6 +140,21 @@ export function createInvestmentStore(filename: string, provider: InvestmentProv
 		const validated = investmentSourceStateSchema.parse(state);
 		db.prepare('INSERT OR REPLACE INTO investment_meta (key, value) VALUES (?, ?)').run('source_state', JSON.stringify(validated));
 	};
+
+	// Bind even an archive-only database to its provider before any source collection.
+	const owner = db.prepare('SELECT value FROM investment_meta WHERE key = ?').get('provider');
+	if (owner && owner.value !== provider) {
+		db.close();
+		throw new Error('Investment database belongs to another provider');
+	}
+
+	try {
+		readState();
+		db.prepare('INSERT OR IGNORE INTO investment_meta (key, value) VALUES (?, ?)').run('provider', provider);
+	} catch (error) {
+		db.close();
+		throw error;
+	}
 
 	const recordFailure = (failure: InvestmentFailure): void => {
 		db.exec('BEGIN IMMEDIATE');
@@ -152,7 +184,21 @@ export function createInvestmentStore(filename: string, provider: InvestmentProv
 			const old = JSON.parse(String(previous.json)) as InvestmentRecord;
 			if (kind === 'products') {
 				const oldProduct = old as InvestmentProduct;
-				const product = row as InvestmentProduct;
+				let product = row as InvestmentProduct;
+				if (provider === 'hapoalim') {
+					const coverage = {...product.coverage};
+					if (coverage.valuations === 'unavailable') {
+						coverage.valuations = oldProduct.coverage.valuations;
+					}
+
+					product = {
+						...product, currentValuationId: product.currentValuationId ?? oldProduct.currentValuationId,
+						coverage,
+					};
+
+					row = product;
+				}
+
 				if (oldProduct.reportSummaries || product.reportSummaries) {
 					const reports = new Map((oldProduct.reportSummaries ?? []).map(report => [report.id, report]));
 					for (const report of product.reportSummaries ?? []) {
@@ -174,7 +220,74 @@ export function createInvestmentStore(filename: string, provider: InvestmentProv
 		return outcome;
 	};
 
+	const appendArchiveRecord = (kind: 'products' | 'valuations', row: InvestmentRecord, observedAt: string): 'inserted' | 'updated' | 'unchanged' => {
+		const previous = recordQuery.get(kind, row.id);
+		if (!previous) {
+			return upsertRecord(kind, row, observedAt);
+		}
+
+		const old = JSON.parse(String(previous.json)) as InvestmentRecord;
+		// Existing current pointers and metadata belong to the live source, never the archive.
+		if (kind === 'products') {
+			const product = old as InvestmentProduct;
+			if (product.provider !== provider || product.currency !== row.currency) {
+				throw new Error('Archive product conflicts with existing source identity');
+			}
+		} else if (financialContent(old) !== financialContent(row)) {
+			throw new Error('Archive valuation conflicts with an existing record');
+		}
+
+		return 'unchanged';
+	};
+
 	return {
+		async backup(destination): Promise<void> {
+			await backup(db, destination);
+		},
+		seedArchive(input, evidence): InvestmentImportSummary {
+			const snapshot = investmentSnapshotSchema.parse(input);
+			if (provider !== 'hapoalim' || snapshot.activities.length > 0 || snapshot.tracks.length > 0 || (snapshot.executions?.length ?? 0) > 0
+				|| snapshot.products.length !== 1 || snapshot.valuations.length === 0
+				|| snapshot.products.some(product => product.currentValuationId !== null)
+				|| snapshot.valuations.some(row => !row.provenance)) {
+				throw new Error('Archive seed requires one historical Hapoalim product and only provenanced valuations');
+			}
+
+			validateRelations(snapshot, provider);
+			if (!/^[\da-f]{64}$/.test(evidence.sourceSha256)
+				|| snapshot.valuations.some(row => row.provenance?.sourceSha256 !== evidence.sourceSha256)) {
+				throw new Error('Archive evidence does not match its valuation provenance');
+			}
+
+			const evidenceJson = JSON.stringify(evidence.manifest);
+			if (!evidenceJson || evidenceJson.length > 20 * 1024 * 1024) {
+				throw new Error('Archive evidence is missing or exceeds the size limit');
+			}
+
+			const summary = {applied: true, inserted: 0, updated: 0, unchanged: 0};
+			db.exec('BEGIN IMMEDIATE');
+			try {
+				readState(); // Refuse a database owned by another provider before any writes.
+				const previousEvidence = db.prepare('SELECT json FROM investment_archive_evidence WHERE sha256 = ?').get(evidence.sourceSha256);
+				if (previousEvidence && previousEvidence.json !== evidenceJson) {
+					throw new Error('Archive evidence conflicts with its stored source hash');
+				}
+
+				db.prepare('INSERT OR IGNORE INTO investment_archive_evidence (sha256, json) VALUES (?, ?)')
+					.run(evidence.sourceSha256, evidenceJson);
+				for (const kind of ['products', 'valuations'] as const) {
+					for (const row of snapshot[kind] ?? []) {
+						summary[appendArchiveRecord(kind, row, snapshot.observedAt)]++;
+					}
+				}
+
+				db.exec('COMMIT');
+				return summary;
+			} catch (error) {
+				db.exec('ROLLBACK');
+				throw error;
+			}
+		},
 		getAutomaticSmsNextAllowedAt(at): InvestmentSourceState['lastAttemptAt'] {
 			const timestamp = Date.parse(z.iso.datetime().parse(at));
 			const row = db.prepare('SELECT value FROM investment_meta WHERE key = ?').get('automatic_sms_attempts');
@@ -251,7 +364,7 @@ export function createInvestmentStore(filename: string, provider: InvestmentProv
 		},
 		applySnapshot(input): InvestmentImportSummary {
 			const snapshot = investmentSnapshotSchema.parse(input);
-			if (!snapshot.complete || !snapshot.inventoryComplete) {
+			if (!snapshot.complete || (!snapshot.inventoryComplete && provider !== 'hapoalim')) {
 				recordFailure({status: 'partial', attemptedAt: snapshot.observedAt, errorCode: 'INCOMPLETE_RESPONSE'});
 				return {applied: false, inserted: 0, updated: 0, unchanged: 0};
 			}
@@ -261,20 +374,39 @@ export function createInvestmentStore(filename: string, provider: InvestmentProv
 			db.exec('BEGIN IMMEDIATE');
 			try {
 				const state = readState();
-				if (state.lastSuccessAt && snapshot.observedAt < state.lastSuccessAt) {
+				if (provider === 'hapoalim') {
+					const prior = db.prepare('SELECT value FROM investment_meta WHERE key = ?').get('last_applied_observation');
+					const appliedAt = prior ? z.iso.datetime().parse(prior.value) : null;
+					const newest = Math.max(...[appliedAt, state.lastAttemptAt, state.lastSuccessAt]
+						.filter((value): value is string => value !== null).map(value => Date.parse(value)));
+					if (Date.parse(snapshot.observedAt) < newest) {
+						db.exec('COMMIT');
+						return {applied: false, inserted: 0, updated: 0, unchanged: 0};
+					}
+				}
+
+				if (provider !== 'hapoalim' && state.lastSuccessAt && snapshot.observedAt < state.lastSuccessAt) {
 					throw new Error('Investment observation predates the last successful collection');
 				}
 
 				for (const kind of recordKinds) {
-					for (const row of snapshot[kind]) {
+					for (const row of snapshot[kind] ?? []) {
 						summary[upsertRecord(kind, row, snapshot.observedAt)]++;
 					}
 				}
 
+				const currentValuesComplete = provider !== 'hapoalim'
+					|| (snapshot.inventoryComplete && snapshot.products.length > 0 && snapshot.products.every(product => product.currentValuationId !== null));
 				writeState({
-					...readState(), status: 'ok', lastAttemptAt: snapshot.observedAt,
-					lastSuccessAt: snapshot.observedAt, errorCode: null, inventoryComplete: true,
+					...readState(), status: currentValuesComplete ? 'ok' : 'partial', lastAttemptAt: snapshot.observedAt,
+					lastSuccessAt: currentValuesComplete ? snapshot.observedAt : state.lastSuccessAt,
+					errorCode: currentValuesComplete ? null : 'INCOMPLETE_RESPONSE', inventoryComplete: snapshot.inventoryComplete,
 				});
+				if (provider === 'hapoalim') {
+					db.prepare('INSERT OR REPLACE INTO investment_meta (key, value) VALUES (?, ?)')
+						.run('last_applied_observation', new Date(snapshot.observedAt).toISOString());
+				}
+
 				db.exec('COMMIT');
 				return summary;
 			} catch (error) {

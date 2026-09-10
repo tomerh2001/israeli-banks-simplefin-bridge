@@ -33,7 +33,7 @@ export type InvestmentRuntimeOptions = Omit<InvestmentCollectionContext, 'store'
 	/** Read-only provider readiness; no login or SMS side effects. */
 	otpHealth?: (socketPath: string, provider: GoogleMessagesProvider) => Promise<GoogleMessagesHealth>;
 	now?: () => Date;
-	provider?: InvestmentProvider;
+	provider?: Exclude<InvestmentProvider, 'hapoalim'>;
 };
 
 export type InvestmentRuntime = {
@@ -52,6 +52,10 @@ export type InvestmentRuntime = {
 export async function createInvestmentRuntime(options: InvestmentRuntimeOptions): Promise<InvestmentRuntime> {
 	const {config, env, secrets, logger} = options;
 	const provider = options.provider ?? 'clal';
+	if (!['clal', 'hachshara_best_invest'].includes(provider)) {
+		throw new Error('Provider requires its own investment runtime');
+	}
+
 	const isBestInvest = provider === 'hachshara_best_invest';
 	const now = options.now ?? (() => new Date());
 	let store: InvestmentStore | undefined;

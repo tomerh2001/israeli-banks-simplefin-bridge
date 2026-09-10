@@ -3,6 +3,7 @@ import type {
 	clalSessionStateSchema,
 	investmentActivitySchema,
 	investmentErrorCodeSchema,
+	investmentExecutionSchema,
 	investmentFeedSchema,
 	investmentProductSchema,
 	investmentProviderSchema,
@@ -19,6 +20,7 @@ export type InvestmentReportSummary = z.infer<typeof investmentReportSummarySche
 export type InvestmentValuation = z.infer<typeof investmentValuationSchema>;
 export type InvestmentActivity = z.infer<typeof investmentActivitySchema>;
 export type InvestmentTrack = z.infer<typeof investmentTrackSchema>;
+export type InvestmentExecution = z.infer<typeof investmentExecutionSchema>;
 export type InvestmentFeed = z.infer<typeof investmentFeedSchema>;
 export type InvestmentSnapshot = z.infer<typeof investmentSnapshotSchema>;
 export type InvestmentSourceState = z.infer<typeof investmentSourceStateSchema>;
@@ -41,6 +43,10 @@ export type InvestmentImportSummary = {
 export type InvestmentStore = {
 	/** Atomic; incomplete results preserve every previously verified row. Absence never deletes a product. */
 	applySnapshot(snapshot: InvestmentSnapshot): InvestmentImportSummary;
+	/** Append reviewed offline valuations only; preserves source freshness and every existing record. */
+	seedArchive(snapshot: InvestmentSnapshot, evidence: {sourceSha256: string; manifest: unknown}): InvestmentImportSummary;
+	/** Native consistent backup, written by the same service user as the database. */
+	backup(destination: string): Promise<void>;
 	recordFailure(failure: InvestmentFailure): void;
 	getSessionState(): ClalSessionState;
 	/** Does not change financial records or source freshness. */

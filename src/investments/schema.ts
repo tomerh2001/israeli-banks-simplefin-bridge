@@ -4,11 +4,21 @@ const id = z.string().trim().min(1).max(255);
 const date = z.iso.date();
 const timestamp = z.iso.datetime();
 const currency = z.string().regex(/^[A-Z]{3}$/);
-export const investmentProviderSchema = z.enum(['clal', 'hachshara_best_invest']);
+export const investmentProviderSchema = z.enum(['clal', 'hachshara_best_invest', 'hapoalim']);
 
 /** Exact money on the wire and in SQLite: never parse through a float. */
 export const investmentMoneySchema = z.string().regex(/^-?(?:0|[1-9]\d*)\.\d{2}$/).refine(value => value !== '-0.00');
 const nonnegativeMoney = investmentMoneySchema.refine(value => !value.startsWith('-'));
+/** Valuations can retain the bank's sub-cent precision; cash activities remain cent-only. */
+export const investmentValuationMoneySchema = z.string().regex(/^(?:0|[1-9]\d*)\.\d{2,6}$/)
+	.pipe(z.string().refine(value => {
+		if (value.length > 16) {
+			return false;
+		}
+
+		const [whole, fraction] = value.split('.');
+		return (BigInt(whole!) * 1_000_000n) + BigInt(fraction!.padEnd(6, '0')) <= 999_999_999_990_000n;
+	}, {message: 'Valuation is outside the supported range'}));
 const coverage = z.enum(['complete', 'partial', 'unavailable']);
 
 export const investmentReportSummarySchema = z.strictObject({
@@ -36,7 +46,7 @@ export const investmentProductSchema = z.strictObject({
 		availableFrom: date.nullable(),
 		availableAmount: nonnegativeMoney.nullable(),
 	}),
-	coverage: z.strictObject({valuations: coverage, activities: coverage, tracks: coverage}),
+	coverage: z.strictObject({valuations: coverage, activities: coverage, tracks: coverage, executions: coverage.optional()}),
 	forecast: z.strictObject({monthlyPension: nonnegativeMoney, currency, asOf: date.nullable()}).nullable(),
 	/** Provider period figures only: never generate activities or add them to valuations. */
 	reportSummaries: z.array(investmentReportSummarySchema)
@@ -50,8 +60,19 @@ export const investmentValuationSchema = z.strictObject({
 	/** Null means the provider did not supply a valuation date. Never substitute the observation date. */
 	asOf: date.nullable(),
 	observedAt: timestamp,
-	amount: nonnegativeMoney,
+	amount: investmentValuationMoneySchema,
 	currency,
+	/** Offline archive evidence is historical only; it never establishes a provider observation. */
+	provenance: z.strictObject({
+		origin: z.literal('sure_archive'),
+		sourceEntryId: z.uuid(),
+		sourceAccountId: z.uuid(),
+		sourceSha256: z.string().regex(/^[\da-f]{64}$/),
+		archiveObservedAt: timestamp,
+		observationBasis: z.enum(['archive_capture', 'archive_read']),
+		bankObservationVerified: z.literal(false),
+		sourceAmount: investmentValuationMoneySchema,
+	}).optional(),
 });
 
 export const investmentActivitySchema = z.strictObject({
@@ -100,6 +121,36 @@ export const investmentTrackSchema = z.strictObject({
 	observedAt: timestamp,
 });
 
+const securityDecimal = z.string().max(64).regex(/^(?:0|[1-9]\d*)(?:\.\d{1,12})?$/);
+
+/** Securities events are a separate ledger; they never become ordinary income or expenses. */
+export const investmentExecutionSchema = z.strictObject({
+	id,
+	productId: id,
+	sourceId: z.string().regex(/^natural-key-v1:[\da-f]{64}$/),
+	sourceIdKind: z.literal('natural_key'),
+	kind: z.enum(['buy', 'sell', 'dividend', 'interest', 'redemption', 'transfer_in', 'transfer_out', 'stock_bonus', 'other']),
+	securityId: id,
+	isin: z.string().regex(/^[A-Z]{2}[0-9A-Z]{9}\d$/).nullable(),
+	symbol: z.string().trim().min(1).max(100).nullable(),
+	name: z.string().trim().min(1).max(500),
+	tradeDate: date,
+	valueDate: date.nullable(),
+	settlementDate: date.nullable(),
+	cancelDate: date.nullable(),
+	cancelled: z.boolean(),
+	quantity: securityDecimal.nullable(),
+	unitPrice: securityDecimal.nullable(),
+	netCashAmount: investmentMoneySchema.nullable(),
+	currency,
+	settlementNetCashAmount: investmentMoneySchema.nullable(),
+	settlementCurrency: currency,
+	sourceTradeType: z.string().max(400),
+	sourceTransactionType: z.string().max(400),
+	sourcePaymentType: z.string().max(400).nullable(),
+	observedAt: timestamp,
+});
+
 export const investmentErrorCodeSchema = z.enum([
 	'OTP_REQUIRED',
 	'INVALID_CREDENTIALS',
@@ -135,6 +186,7 @@ const dataShape = {
 	valuations: z.array(investmentValuationSchema),
 	activities: z.array(investmentActivitySchema),
 	tracks: z.array(investmentTrackSchema),
+	executions: z.array(investmentExecutionSchema).default([]).optional(),
 };
 
 export const investmentFeedSchema = z.strictObject({
