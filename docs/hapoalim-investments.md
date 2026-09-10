@@ -205,22 +205,27 @@ product has `currentValuationId: null`. Use
 triggering collection. Verify SQLite/WAL/SHM ownership and an actual application
 read after deployment or maintenance.
 
-### Verified native seed — September 10, 2026
+### Verified onboarding — September 10, 2026
 
 The native seed successfully stored the 16 surviving valuations dated April
 2–27, 2026 with their original identities, financial amounts and dates. Current
 value remains unknown, and provider attempt/success timestamps remain unset.
-The older 52 transaction records were not imported. This establishes the bridge's
-archival baseline; confirm the destination separately through Securo's native
-cached import and exact reconciliation.
+The older 52 transaction records were not imported. Securo's native onboarding
+created one investment asset and group, imported the same 16 exact historical
+values, and created no activities or executions. Current balance and source
+attempt/success timestamps remain unset. Repeating the cached sync was
+idempotent, and preexisting financial records and policy settings were unchanged.
+The worker and scheduler were restored on the published Securo image, and the
+worker answered its health check.
 
 Archive observation timestamps crossing Python and JavaScript need identical
-precision. Prepare a derived transport copy with UTC timestamps truncated to
-milliseconds, matching JavaScript `Date.toISOString()` exactly. Keep the original
-manifest and its full observation precision unchanged in private evidence. This
-normalization applies only to observation timestamps; financial values and
-valuation dates are unchanged, and archive observation never establishes bank
-freshness.
+precision. The native JavaScript seed canonicalizes them with
+`Date.toISOString()`. Private verification must normalize its expected
+observation timestamp to that same UTC representation, truncating to
+milliseconds. Keep the original manifest and its full observation precision
+unchanged; no transport copy is required. This comparison normalization applies
+only to observation timestamps. Financial values and valuation dates are
+unchanged, and archive observation never establishes bank freshness.
 
 The native seeder requires private directories. On this TrueNAS host,
 mode 0700 alone did not remove inherited named ACL access. Follow the
