@@ -202,8 +202,11 @@ store's archival evidence table; raw account details never appear in the feed.
 The source stays `never_synced` when only archive data exists, and each initial
 product has `currentValuationId: null`. Use
 `bridge hapoalim-investments-status` to inspect aggregate cached status without
-triggering collection. Verify SQLite/WAL/SHM ownership and an actual application
-read after deployment or maintenance.
+triggering collection. The command prints valid structured status and exits 1
+when the source is not `ok`, including the expected archive-only `never_synced`
+state. Read that JSON before treating a nonzero exit as a command failure; it
+does not authorize a bank retry. Verify SQLite/WAL/SHM ownership and an actual
+application read after deployment or maintenance.
 
 ### Verified onboarding — September 10, 2026
 
