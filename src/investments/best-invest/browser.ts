@@ -121,21 +121,48 @@ export function saveBestInvestSession(profileDir: string, session: unknown): boo
 	}
 }
 
-async function stopProcess(child: ChildProcess | undefined): Promise<void> {
-	if (!child?.pid || child.exitCode !== null || child.signalCode !== null) {
+function processExited(child: ChildProcess): boolean {
+	return !child.pid || child.exitCode !== null || child.signalCode !== null;
+}
+
+async function waitForProcessExit(child: ChildProcess, timeoutMs: number): Promise<boolean> {
+	if (processExited(child)) {
+		return true;
+	}
+
+	return new Promise<boolean>(resolve => {
+		const onExit = () => {
+			clearTimeout(timer);
+			resolve(true);
+		};
+
+		const timer = setTimeout(() => {
+			child.removeListener('exit', onExit);
+			resolve(false);
+		}, timeoutMs);
+		child.once('exit', onExit);
+	});
+}
+
+/** CDP close resolves before native Chromium finishes flushing its profile and locks. */
+export async function stopBestInvestProcess(child: ChildProcess | undefined, graceMs = 5000, signalWaitMs = 5000): Promise<void> {
+	if (!child || await waitForProcessExit(child, graceMs)) {
 		return;
 	}
 
-	await new Promise<void>(resolve => {
-		const timer = setTimeout(() => {
-			child.kill('SIGKILL');
-		}, 5000);
-		child.once('exit', () => {
-			clearTimeout(timer);
-			resolve();
-		});
-		child.kill('SIGTERM');
-	});
+	for (const signal of ['SIGTERM', 'SIGKILL'] as const) {
+		// Observe exit before signalling; keep cleanup bounded even when CDP failed
+		// or the collection's abort signal is already set.
+		const exited = waitForProcessExit(child, signalWaitMs);
+		child.kill(signal);
+		// eslint-disable-next-line no-await-in-loop -- Escalate only after the previous bounded wait expires.
+		if (await exited) {
+			return;
+		}
+	}
+
+	// The caller must retain its profile lease if the native process is still alive.
+	throw new BestInvestCollectionError('COLLECTION_FAILED');
 }
 
 /** Native headed Chromium was required by the portal. CDP stays on a random loopback port. */
@@ -159,13 +186,13 @@ export async function withBestInvestBrowser<T>(options: BestInvestBrowserOptions
 				await Promise.race([browser.close().catch(() => undefined), delay(5000)]);
 			}
 
-			await stopProcess(native);
+			await stopBestInvestProcess(native);
 		})();
 		await closing;
 	};
 
 	controller.signal.addEventListener('abort', () => {
-		void close();
+		void close().catch(() => undefined);
 	}, {once: true});
 	const sessionFile = path.join(lease.profileDir, 'portal-session.json');
 	try {

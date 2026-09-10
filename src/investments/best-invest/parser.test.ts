@@ -5,6 +5,7 @@ import {
 	parseBestInvestDate,
 	parseBestInvestJson,
 	parseBestInvestMoney,
+	type BestInvestIncompleteReason,
 } from './parser.js';
 
 const observedAt = '2026-09-08T10:00:00.000Z';
@@ -209,5 +210,128 @@ describe('Best Invest snapshots', () => {
 		expect(buildBestInvestSnapshot({...input, policies: [policy]}).complete).toBe(true);
 		policy.details = JSON.parse(response) as unknown;
 		expect(() => buildBestInvestSnapshot({...input, policies: [policy]})).toThrow(/^INVALID_RESPONSE$/);
+	});
+});
+
+describe('Best Invest incomplete diagnostics', () => {
+	const cases: Array<[BestInvestIncompleteReason, (input: ReturnType<typeof fixture>) => void]> = [
+		['INVENTORY_INCOMPLETE', input => {
+			input.inventoryComplete = false;
+		}],
+		['POLICIES_EMPTY', input => {
+			input.policies = [];
+		}],
+		['POLICY_DETAILS_MISSING', input => {
+			Object.assign(input.policies[0]!, {details: null});
+		}],
+		['POLICY_ID_MISSING', input => {
+			Object.assign(input.policies[0]!.details, {PolicyId: null});
+		}],
+		['POLICY_NAME_MISSING', input => {
+			Object.assign(input.policies[0]!.details, {ProductName: null});
+		}],
+		['VALUATION_AMOUNT_MISSING', input => {
+			Object.assign(input.policies[0]!.details, {TotalSavings: null});
+		}],
+		['TRACK_ACCUMULATION_MISSING', input => {
+			Object.assign(input.policies[0]!.details, {PidyonTzvira: null});
+		}],
+		['TRACK_ALLOCATION_MISSING', input => {
+			Object.assign(input.policies[0]!.details, {InvestmentPolicy: null});
+		}],
+		['TRACK_ROWS_INVALID', input => {
+			Object.assign(input.policies[0]!.details.PidyonTzvira, {Pidyon: {}});
+		}],
+		['TRACK_ALLOCATION_ROWS_INVALID', input => {
+			Object.assign(input.policies[0]!.details.InvestmentPolicy, {Investments: null});
+		}],
+		['TRACK_TOTAL_MISSING', input => {
+			Object.assign(input.policies[0]!.details.PidyonTzvira, {TotalTzviraMaslulim: null});
+		}],
+		['TRACK_AMOUNT_MISSING', input => {
+			Object.assign(input.policies[0]!.details.PidyonTzvira.Pidyon[0]!, {TotalTzvira: null});
+		}],
+		['TRACK_MAPPING_MISSING', input => {
+			input.policies[0]!.details.InvestmentPolicy.Investments.pop();
+		}],
+		['TRACK_MAPPING_AMBIGUOUS', input => {
+			const rows = input.policies[0]!.details.InvestmentPolicy.Investments;
+			rows.push({...rows[0]!});
+		}],
+		['TRACK_ID_MISSING', input => {
+			Object.assign(input.policies[0]!.details.InvestmentPolicy.Investments[0]!, {MaslulId: null});
+		}],
+		['TRACK_SUM_MISMATCH', input => {
+			input.policies[0]!.details.PidyonTzvira.Pidyon[0]!.TotalTzvira = '1000.11';
+		}],
+		['TRACK_TOTAL_MISMATCH', input => {
+			input.policies[0]!.details.PidyonTzvira.TotalTzviraMaslulim = '1250.24';
+		}],
+		['DEPOSITS_MISSING', input => {
+			Object.assign(input.policies[0]!, {deposits: null});
+		}],
+		['DEPOSIT_ROWS_INVALID', input => {
+			Object.assign(input.policies[0]!.deposits, {Deposits: {}});
+		}],
+		['DEPOSITS_TOTAL_MISSING', input => {
+			Object.assign(input.policies[0]!.deposits, {TotalAmount: null});
+		}],
+		['DEPOSIT_AMOUNT_MISSING', input => {
+			Object.assign(input.policies[0]!.deposits.Deposits[0]!, {Amount: null});
+		}],
+		['DEPOSITS_SUM_MISMATCH', input => {
+			input.policies[0]!.deposits.TotalAmount = '199.99';
+		}],
+	];
+	it.each(cases)('reports only the fixed %s code without changing the incomplete snapshot', (expected, mutate) => {
+		const input = fixture();
+		mutate(input);
+		const baseline = buildBestInvestSnapshot(input);
+		const reasons: BestInvestIncompleteReason[] = [];
+		const result = buildBestInvestSnapshot({...input, onIncomplete(reason) {
+			reasons.push(reason);
+		}});
+		expect(result).toEqual(baseline);
+		expect(result).toMatchObject({complete: false, inventoryComplete: false});
+		expect(reasons).toEqual([expected]);
+	});
+
+	it('does not evaluate invalid values after an existing reconciliation short circuit', () => {
+		const input = fixture();
+		input.policies[0]!.details.PidyonTzvira.Pidyon[0]!.TotalTzvira = '1000.11';
+		input.policies[0]!.details.PidyonTzvira.TotalTzviraMaslulim = 'not money';
+		const reasons: BestInvestIncompleteReason[] = [];
+		expect(buildBestInvestSnapshot({...input, onIncomplete(reason) {
+			reasons.push(reason);
+		}}).complete).toBe(false);
+		expect(reasons).toEqual(['TRACK_SUM_MISMATCH']);
+	});
+
+	it('keeps optional deposits and zero tracks valid without diagnostic side effects', () => {
+		const input = fixture();
+		Object.assign(input.policies[0]!, {deposits: undefined});
+		const {details} = (input.policies[0]!);
+		details.TotalSavings = '0';
+		Object.assign(details.PidyonTzvira, {Pidyon: [{TotalTzvira: '0'}], TotalTzviraMaslulim: '0'});
+		details.InvestmentPolicy.Investments = [];
+		const reasons: BestInvestIncompleteReason[] = [];
+		const result = buildBestInvestSnapshot({...input, onIncomplete(reason) {
+			reasons.push(reason);
+		}});
+		expect(result).toMatchObject({complete: true, inventoryComplete: true, tracks: []});
+		expect(reasons).toEqual([]);
+	});
+
+	it('keeps malformed present money invalid and observer failures financially inert', () => {
+		const input = fixture();
+		input.policies[0]!.deposits.Deposits[0]!.Amount = 'not money';
+		expect(() => buildBestInvestSnapshot({...input, onIncomplete() {
+			throw new Error('observer failed');
+		}})).toThrow(/^INVALID_RESPONSE$/);
+		Object.assign(input.policies[0]!, {deposits: null});
+		expect(buildBestInvestSnapshot({...input, onIncomplete() {
+			throw new Error('observer failed');
+		}}))
+			.toEqual(buildBestInvestSnapshot(input));
 	});
 });

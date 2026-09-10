@@ -7,6 +7,7 @@ import type {InvestmentCollectionContext} from '../runtime.js';
 import type {InvestmentStore} from '../types.js';
 import * as browserModule from './browser.js';
 import {createBestInvestCollector, loginBestInvest, readBestInvestSnapshot, requestBestInvest} from './collector.js';
+import {buildBestInvestSnapshot} from './parser.js';
 
 vi.mock('./browser.js', async importOriginal => ({
 	...await importOriginal<typeof browserModule>(), withBestInvestBrowser: vi.fn(),
@@ -36,6 +37,35 @@ afterEach(() => {
 });
 
 describe('Best Invest collection isolation and cancellation', () => {
+	it('logs each fixed incomplete reason once while retaining all previously verified financial rows', async () => {
+		const input = context();
+		input.store.applySnapshot(buildBestInvestSnapshot({observedAt, inventoryComplete: true, policies: [{details: {
+			PolicyId: '123', ProductName: 'Synthetic private policy', TotalSavings: '27.50',
+			PidyonTzvira: {AppraislDate: '2026-09-07', TotalTzviraMaslulim: '27.50', Pidyon: [{TotalTzvira: '27.50', BeitHashkaot: 'Synthetic house', Maslul: 'Synthetic route'}]},
+			InvestmentPolicy: {Investments: [{BeitHashkaotName: 'Synthetic house', Maslul: 'Synthetic route', BeitHashkaotId: '1', MaslulId: '2'}]},
+		}}]}));
+		const before = input.store.getFeed(new Date(observedAt), 72);
+		const page = {url: () => browserModule.BEST_INVEST_ORIGIN, evaluate: vi.fn()
+			.mockResolvedValueOnce(true)
+			.mockResolvedValueOnce({text: '{"Policies":[{"PolicyNumber":"123","TemplateId":"8"},{"PolicyNumber":"456","TemplateId":"8"}]}'})
+			.mockResolvedValueOnce({text: '{"PolicyId":"123","ProductName":"Synthetic private policy","TotalSavings":null}'})
+			.mockResolvedValueOnce({text: '{"Deposits":[],"TotalAmount":"0"}'})
+			.mockResolvedValueOnce({text: '{"PolicyId":"456","ProductName":"Other synthetic private policy","TotalSavings":null}'})
+			.mockResolvedValueOnce({text: '{"Deposits":[],"TotalAmount":"0"}'})};
+		vi.mocked(withBestInvestBrowser).mockImplementation(async (_options, work) => work(page as never, input.signal));
+		expect(await createBestInvestCollector()(input)).toBe('partial');
+		const after = input.store.getFeed(new Date(), 72);
+		expect(after.products).toEqual(before.products);
+		expect(after.valuations).toEqual(before.valuations);
+		expect(after.tracks).toEqual(before.tracks);
+		expect(after.source).toMatchObject({status: 'partial', errorCode: 'INCOMPLETE_RESPONSE', lastSuccessAt: observedAt});
+		expect(logger.warn).toHaveBeenCalledExactlyOnceWith('Best Invest snapshot incomplete', {reason: 'VALUATION_AMOUNT_MISSING'});
+		const logs = JSON.stringify([...vi.mocked(logger.warn).mock.calls, ...vi.mocked(logger.info).mock.calls]);
+		for (const privateValue of ['Synthetic private policy', 'Other synthetic private policy', '123', '456', '27.50', 'Synthetic house', 'Synthetic route']) {
+			expect(logs).not.toContain(privateValue);
+		}
+	});
+
 	it('does not open a browser or update source health after shutdown', async () => {
 		const controller = new AbortController();
 		controller.abort();

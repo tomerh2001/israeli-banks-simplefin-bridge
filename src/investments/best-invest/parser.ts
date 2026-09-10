@@ -18,7 +18,42 @@ export type BuildBestInvestSnapshotInput = {
 	observedAt: string;
 	policies: BestInvestCapturedPolicy[];
 	inventoryComplete: boolean;
+	/** Fixed diagnostic codes only; observation must not affect financial decisions. */
+	onIncomplete?(reason: BestInvestIncompleteReason): void;
 };
+
+export type BestInvestIncompleteReason =
+	| 'INVENTORY_INCOMPLETE'
+	| 'POLICIES_EMPTY'
+	| 'POLICY_DETAILS_MISSING'
+	| 'POLICY_ID_MISSING'
+	| 'POLICY_NAME_MISSING'
+	| 'VALUATION_AMOUNT_MISSING'
+	| 'TRACK_ACCUMULATION_MISSING'
+	| 'TRACK_ALLOCATION_MISSING'
+	| 'TRACK_ROWS_INVALID'
+	| 'TRACK_ALLOCATION_ROWS_INVALID'
+	| 'TRACK_TOTAL_MISSING'
+	| 'TRACK_AMOUNT_MISSING'
+	| 'TRACK_MAPPING_MISSING'
+	| 'TRACK_MAPPING_AMBIGUOUS'
+	| 'TRACK_ID_MISSING'
+	| 'TRACK_SUM_MISMATCH'
+	| 'TRACK_TOTAL_MISMATCH'
+	| 'DEPOSITS_MISSING'
+	| 'DEPOSIT_ROWS_INVALID'
+	| 'DEPOSITS_TOTAL_MISSING'
+	| 'DEPOSIT_AMOUNT_MISSING'
+	| 'DEPOSITS_SUM_MISMATCH';
+
+function incomplete(snapshot: InvestmentSnapshot, onIncomplete: BuildBestInvestSnapshotInput['onIncomplete'], reason: BestInvestIncompleteReason): void {
+	snapshot.complete = false;
+	try {
+		onIncomplete?.(reason);
+	} catch {
+		// Diagnostics cannot turn a partial response into an error or accepted data.
+	}
+}
 
 export class BestInvestParseError extends Error {
 	constructor() {
@@ -158,9 +193,12 @@ function policyProduct(details: Record<string, unknown>): InvestmentProduct {
 	};
 }
 
-function addTracks(snapshot: InvestmentSnapshot, product: InvestmentProduct, details: Record<string, unknown>, asOf: InvestmentValuation['asOf'], balance: string): void {
+function addTracks(
+	snapshot: InvestmentSnapshot, product: InvestmentProduct, details: Record<string, unknown>,
+	asOf: InvestmentValuation['asOf'], balance: string, onIncomplete: BuildBestInvestSnapshotInput['onIncomplete'],
+): void {
 	if (missing(details.PidyonTzvira) || missing(details.InvestmentPolicy)) {
-		snapshot.complete = false;
+		incomplete(snapshot, onIncomplete, missing(details.PidyonTzvira) ? 'TRACK_ACCUMULATION_MISSING' : 'TRACK_ALLOCATION_MISSING');
 		return;
 	}
 
@@ -168,7 +206,10 @@ function addTracks(snapshot: InvestmentSnapshot, product: InvestmentProduct, det
 	const investment = record(details.InvestmentPolicy);
 	if (!Array.isArray(accumulation.Pidyon) || !Array.isArray(investment.Investments)
 		|| missing(accumulation.TotalTzviraMaslulim)) {
-		snapshot.complete = false;
+		const reason = Array.isArray(accumulation.Pidyon)
+			? (Array.isArray(investment.Investments) ? 'TRACK_TOTAL_MISSING' : 'TRACK_ALLOCATION_ROWS_INVALID')
+			: 'TRACK_ROWS_INVALID';
+		incomplete(snapshot, onIncomplete, reason);
 		return;
 	}
 
@@ -178,7 +219,7 @@ function addTracks(snapshot: InvestmentSnapshot, product: InvestmentProduct, det
 	for (const raw of accumulation.Pidyon) {
 		const row = record(raw);
 		if (missing(row.TotalTzvira)) {
-			snapshot.complete = false;
+			incomplete(snapshot, onIncomplete, 'TRACK_AMOUNT_MISSING');
 			return;
 		}
 
@@ -194,13 +235,13 @@ function addTracks(snapshot: InvestmentSnapshot, product: InvestmentProduct, det
 		// to the policy allocation table, which supplies stable provider codes.
 		const matches = allocations.filter(candidate => text(candidate.BeitHashkaotName) === house && text(candidate.Maslul) === route);
 		if (matches.length !== 1) {
-			snapshot.complete = false;
+			incomplete(snapshot, onIncomplete, matches.length === 0 ? 'TRACK_MAPPING_MISSING' : 'TRACK_MAPPING_AMBIGUOUS');
 			return;
 		}
 
 		const match = matches[0]!;
 		if (missing(match.BeitHashkaotId) || missing(match.MaslulId)) {
-			snapshot.complete = false;
+			incomplete(snapshot, onIncomplete, 'TRACK_ID_MISSING');
 			return;
 		}
 
@@ -216,8 +257,13 @@ function addTracks(snapshot: InvestmentSnapshot, product: InvestmentProduct, det
 		return invalid();
 	}
 
-	if (sum !== cents(balance) || nonnegativeMoney(accumulation.TotalTzviraMaslulim) !== balance) {
-		snapshot.complete = false;
+	if (sum !== cents(balance)) {
+		incomplete(snapshot, onIncomplete, 'TRACK_SUM_MISMATCH');
+		return;
+	}
+
+	if (nonnegativeMoney(accumulation.TotalTzviraMaslulim) !== balance) {
+		incomplete(snapshot, onIncomplete, 'TRACK_TOTAL_MISMATCH');
 		return;
 	}
 
@@ -225,7 +271,7 @@ function addTracks(snapshot: InvestmentSnapshot, product: InvestmentProduct, det
 	product.coverage.tracks = 'complete';
 }
 
-function addDepositSummary(snapshot: InvestmentSnapshot, product: InvestmentProduct, capture: BestInvestCapturedPolicy): void {
+function addDepositSummary(snapshot: InvestmentSnapshot, product: InvestmentProduct, capture: BestInvestCapturedPolicy, onIncomplete: BuildBestInvestSnapshotInput['onIncomplete']): void {
 	if (capture.deposits === undefined) {
 		return;
 	}
@@ -235,13 +281,13 @@ function addDepositSummary(snapshot: InvestmentSnapshot, product: InvestmentProd
 	}
 
 	if (capture.deposits === null) {
-		snapshot.complete = false;
+		incomplete(snapshot, onIncomplete, 'DEPOSITS_MISSING');
 		return;
 	}
 
 	const data = record(capture.deposits);
 	if (!Array.isArray(data.Deposits) || missing(data.TotalAmount)) {
-		snapshot.complete = false;
+		incomplete(snapshot, onIncomplete, Array.isArray(data.Deposits) ? 'DEPOSITS_TOTAL_MISSING' : 'DEPOSIT_ROWS_INVALID');
 		return;
 	}
 
@@ -249,7 +295,7 @@ function addDepositSummary(snapshot: InvestmentSnapshot, product: InvestmentProd
 	for (const raw of data.Deposits) {
 		const row = record(raw);
 		if (missing(row.Amount)) {
-			snapshot.complete = false;
+			incomplete(snapshot, onIncomplete, 'DEPOSIT_AMOUNT_MISSING');
 			return;
 		}
 
@@ -258,7 +304,7 @@ function addDepositSummary(snapshot: InvestmentSnapshot, product: InvestmentProd
 	}
 
 	if (fromCents(sum) !== parseBestInvestMoney(data.TotalAmount)) {
-		snapshot.complete = false;
+		incomplete(snapshot, onIncomplete, 'DEPOSITS_SUM_MISMATCH');
 		return;
 	}
 
@@ -282,15 +328,23 @@ export function buildBestInvestSnapshot(input: BuildBestInvestSnapshotInput): In
 		observedAt: input.observedAt, complete: input.inventoryComplete && input.policies.length > 0,
 		inventoryComplete: input.inventoryComplete, products: [], valuations: [], activities: [], tracks: [],
 	};
+	if (!input.inventoryComplete) {
+		incomplete(snapshot, input.onIncomplete, 'INVENTORY_INCOMPLETE');
+	}
+
+	if (input.policies.length === 0) {
+		incomplete(snapshot, input.onIncomplete, 'POLICIES_EMPTY');
+	}
+
 	for (const capture of input.policies) {
 		if (missing(capture.details)) {
-			snapshot.complete = false;
+			incomplete(snapshot, input.onIncomplete, 'POLICY_DETAILS_MISSING');
 			continue;
 		}
 
 		const details = record(capture.details);
 		if (missing(details.PolicyId) || missing(details.ProductName)) {
-			snapshot.complete = false;
+			incomplete(snapshot, input.onIncomplete, missing(details.PolicyId) ? 'POLICY_ID_MISSING' : 'POLICY_NAME_MISSING');
 			continue;
 		}
 
@@ -305,7 +359,7 @@ export function buildBestInvestSnapshot(input: BuildBestInvestSnapshotInput): In
 
 		snapshot.products.push(product);
 		if (missing(details.TotalSavings)) {
-			snapshot.complete = false;
+			incomplete(snapshot, input.onIncomplete, 'VALUATION_AMOUNT_MISSING');
 			continue;
 		}
 
@@ -317,8 +371,8 @@ export function buildBestInvestSnapshot(input: BuildBestInvestSnapshotInput): In
 		snapshot.valuations.push({id, productId: product.id, amount, asOf, currency: 'ILS', observedAt: input.observedAt});
 		product.currentValuationId = id;
 		product.coverage.valuations = 'partial';
-		addTracks(snapshot, product, details, asOf, amount);
-		addDepositSummary(snapshot, product, capture);
+		addTracks(snapshot, product, details, asOf, amount, input.onIncomplete);
+		addDepositSummary(snapshot, product, capture, input.onIncomplete);
 	}
 
 	snapshot.inventoryComplete = input.inventoryComplete && snapshot.complete;
