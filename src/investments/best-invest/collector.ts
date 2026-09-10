@@ -8,7 +8,7 @@ import {createGoogleMessagesOtpSource} from '../otp.js';
 import type {InvestmentCollectionContext, InvestmentCollector} from '../runtime.js';
 import type {InvestmentSnapshot} from '../types.js';
 import {BEST_INVEST_LOGIN_URL, BEST_INVEST_ORIGIN, BestInvestCollectionError, BestInvestProfileBusyError, withBestInvestBrowser} from './browser.js';
-import {buildBestInvestSnapshot, parseBestInvestJson} from './parser.js';
+import {buildBestInvestSnapshot, parseBestInvestJson, type BestInvestIncompleteReason, type BuildBestInvestSnapshotInput} from './parser.js';
 
 const endpoints = {
 	policies: '/Services/api/BestInvestPoliciesQuery/GetCustomerBestInvestPolicies',
@@ -212,7 +212,10 @@ export async function loginBestInvest(page: Page, context: InvestmentCollectionC
 	}
 }
 
-export async function readBestInvestSnapshot(page: Page, policyResponse: unknown, observedAt: string, signal: AbortSignal): Promise<InvestmentSnapshot> {
+export async function readBestInvestSnapshot(
+	page: Page, policyResponse: unknown, observedAt: string, signal: AbortSignal,
+	onIncomplete?: BuildBestInvestSnapshotInput['onIncomplete'],
+): Promise<InvestmentSnapshot> {
 	const response = object(policyResponse);
 	if (!Array.isArray(response.Policies) || response.Policies.length > 200 || response.IsSuccess === false) {
 		throw new BestInvestCollectionError('INVALID_RESPONSE');
@@ -251,7 +254,7 @@ export async function readBestInvestSnapshot(page: Page, policyResponse: unknown
 	}
 
 	signal.throwIfAborted();
-	return buildBestInvestSnapshot({policies, observedAt, inventoryComplete: true});
+	return buildBestInvestSnapshot({policies, observedAt, inventoryComplete: true, onIncomplete});
 }
 
 /** Each source owns its profile, store, request budget and freshness status. */
@@ -262,6 +265,16 @@ export function createBestInvestCollector(options: BestInvestCollectorOptions = 
 		}
 
 		const attemptedAt = new Date().toISOString();
+		const reportedReasons = new Set<BestInvestIncompleteReason>();
+		const onIncomplete = (reason: BestInvestIncompleteReason): void => {
+			if (reportedReasons.has(reason)) {
+				return;
+			}
+
+			reportedReasons.add(reason);
+			context.logger.warn('Best Invest snapshot incomplete', {reason});
+		};
+
 		try {
 			let expectedIdentity: string;
 			try {
@@ -314,7 +327,7 @@ export function createBestInvestCollector(options: BestInvestCollectorOptions = 
 					policies = await requestBestInvest(page, 'policies');
 				}
 
-				return readBestInvestSnapshot(page, policies, attemptedAt, signal);
+				return readBestInvestSnapshot(page, policies, attemptedAt, signal, onIncomplete);
 			});
 			if (context.signal.aborted) {
 				return 'error';

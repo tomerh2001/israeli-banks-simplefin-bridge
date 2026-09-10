@@ -147,3 +147,25 @@ snapshot and retained the previous values and last success of September 9,
 recovery sequence. The rejected raw response was not retained, so the incomplete
 provider data was not identified; browser recovery did not establish a successful
 financial collection.
+
+### Native shutdown and incomplete diagnostics
+
+After CDP acknowledges browser close, allow up to five seconds for native
+Chromium to finish profile cleanup. If it remains alive, send SIGTERM and then
+SIGKILL, each with a bounded five-second exit wait. If exit cannot be confirmed,
+retain the collector lease so another collection cannot reuse an owned profile.
+This shutdown path never removes Singleton links automatically.
+
+An incomplete snapshot emits `Best Invest snapshot incomplete` with a fixed
+`reason` code, once per distinct reason in that collection. Codes identify missing
+inventory or policy fields, missing valuation amounts, unavailable or ambiguous
+track mappings, and track or deposit reconciliation failures. Logs contain no
+provider identifiers, amounts, labels or raw responses. Invalid present values
+still fail validation; optional unrequested deposits and zero-value tracks keep
+their existing behavior.
+
+These diagnostic codes do not change `INCOMPLETE_RESPONSE`, import eligibility,
+stored values, source freshness or retry allowances. They describe the next
+native collection's rejection and cannot identify the unretained September 10
+response retrospectively. Use the next normally scheduled collection to obtain
+new evidence; deployment does not justify an extra provider request.
