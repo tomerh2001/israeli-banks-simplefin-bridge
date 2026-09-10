@@ -6,7 +6,8 @@
  */
 
 import type {CompanyTypes} from 'israeli-bank-scrapers';
-import type {BestInvestConfig, InvestmentConfig} from './investments/config.js';
+import type {BestInvestConfig, HapoalimInvestmentsConfig, InvestmentConfig} from './investments/config.js';
+import type {InvestmentStore} from './investments/types.js';
 
 export type CompanyId = `${CompanyTypes}`;
 
@@ -94,6 +95,7 @@ export type Config = {
 	/** Dedicated investment collection/feed; never exported as SimpleFIN accounts. */
 	investments?: InvestmentConfig;
 	bestInvest?: BestInvestConfig;
+	hapoalimInvestments?: HapoalimInvestmentsConfig;
 	server: ServerConfig;
 };
 
@@ -399,6 +401,8 @@ export type SourceRunContext = {
 	defaultCurrency: string;
 	/** Absolute Chrome profile directory for this company. */
 	profileDir: string;
+	/** Optional investment reads share the existing guarded Hapoalim login. */
+	hapoalimInvestments?: {config: HapoalimInvestmentsConfig; store: InvestmentStore};
 };
 
 export type SourceRunOutcome =

@@ -9,9 +9,11 @@
 import {chmodSync, existsSync, mkdirSync, readdirSync, rmSync, statSync} from 'node:fs';
 import path from 'node:path';
 import {createScraper, type CompanyTypes, type ScraperOptions, type ScraperScrapingResult} from 'israeli-bank-scrapers';
-// puppeteer is provided (and version-pinned) by israeli-bank-scrapers; types only here.
+// Use the same pinned Puppeteer that the ordinary bank scraper uses.
 // eslint-disable-next-line import-x/no-extraneous-dependencies, n/no-extraneous-import
-import type {Browser, Page} from 'puppeteer';
+import puppeteer, {type Browser, type Page} from 'puppeteer';
+import {hapoalimApiBase} from '../investments/hapoalim/browser.js';
+import {collectHapoalimInvestments} from '../investments/hapoalim/collector.js';
 import type {Logger} from '../log.js';
 import {normalizeScrapeResult} from '../normalize.js';
 import type {
@@ -159,6 +161,9 @@ export async function runCompany(ctx: SourceRunContext, logger: Logger): Promise
 	const startedAt = new Date();
 	let browser: Browser | undefined;
 	let lastUrl: string | undefined;
+	let observedApiBase: string | undefined;
+	const sharedInvestments = ctx.company === 'hapoalim' && ctx.hapoalimInvestments?.config.enabled;
+	let scrapeCancelled = false;
 	let observedOtpForm = false;
 	const otpWatcher = new AbortController();
 
@@ -175,6 +180,12 @@ export async function runCompany(ctx: SourceRunContext, logger: Logger): Promise
 			browser = instance;
 		},
 		onPage(page) {
+			if (sharedInvestments) {
+				page.on('request', request => {
+					observedApiBase = hapoalimApiBase(request.url()) ?? observedApiBase;
+				});
+			}
+
 			trackMainFrameUrl(page, url => {
 				lastUrl = url;
 			});
@@ -187,26 +198,62 @@ export async function runCompany(ctx: SourceRunContext, logger: Logger): Promise
 	});
 
 	try {
-		const scraper = createScraper(options);
-		scraper.onProgress((_company, payload) => {
-			log.info('progress', {type: payload.type});
-		});
-
 		log.info('scrape started', {startDate: ctx.startDate.toISOString().slice(0, 10), timeoutMinutes: ctx.config.timeoutMinutes});
-		const scrapePromise = scraper.scrape(ctx.credentials as Parameters<typeof scraper.scrape>[0]);
+		const scrapePromise = (async () => {
+			let actualOptions = options;
+			if (sharedInvestments) {
+				// Official external-browser ownership keeps the authenticated context alive
+				// after the library closes its checking page. The native login runs once.
+				browser = await puppeteer.launch({
+					executablePath: 'executablePath' in options ? options.executablePath : undefined,
+					args: 'args' in options ? options.args : undefined,
+					timeout: 'timeout' in options ? options.timeout : LAUNCH_TIMEOUT_MS,
+					headless: false,
+				});
+				if ('prepareBrowser' in options) {
+					await options.prepareBrowser?.(browser);
+				}
+
+				if (scrapeCancelled) {
+					await killBrowser(browser, log);
+					throw new Error('Browser initialization exceeded the scrape deadline');
+				}
+
+				actualOptions = {...options, browser, skipCloseBrowser: true};
+			}
+
+			const scraper = createScraper(actualOptions);
+			scraper.onProgress((_company, payload) => {
+				log.info('progress', {type: payload.type});
+			});
+			return scraper.scrape(ctx.credentials as Parameters<typeof scraper.scrape>[0]);
+		})();
 		scrapePromise.catch(() => undefined); // The deadline branch may abandon it; never let it become unhandled.
 		const outcome = await withDeadline(scrapePromise, ctx.config.timeoutMinutes * 60_000);
 		if (outcome.expired) {
+			scrapeCancelled = true;
 			log.warn('scrape timed out; killing browser', {timeoutMinutes: ctx.config.timeoutMinutes});
 			await killBrowser(browser, log);
 			return {ok: false, ...mapScraperError('TIMEOUT', undefined, observedOtpForm)};
 		}
 
-		return finishRun(ctx, outcome.value, lastUrl, observedOtpForm, log);
+		const result = finishRun(ctx, outcome.value, lastUrl, observedOtpForm, log);
+		if (result.ok && sharedInvestments && browser?.connected) {
+			// The checking result is already verified. Investment failures and their
+			// independent three-minute bound cannot discard those successful records.
+			try {
+				await collectHapoalimInvestments({context: ctx, browser, apiBase: observedApiBase ?? '', logger: log});
+			} catch {
+				log.warn('Hapoalim investment integration failed; checking result retained');
+			}
+		}
+
+		return result;
 	} catch (error) {
 		log.error('scrape threw', {error: (error as Error).message});
 		return {ok: false, errorType: 'BRIDGE_ERROR', message: SCRAPE_ERROR_MESSAGES.BRIDGE_ERROR};
 	} finally {
+		scrapeCancelled = true;
 		otpWatcher.abort();
 		if (existsSync(screenshot)) {
 			chmodSync(screenshot, 0o600);

@@ -1,0 +1,86 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-09-10T09:00:00.000Z",
+  "source": {
+    "provider": "hapoalim",
+    "status": "partial",
+    "lastAttemptAt": "2026-09-10T09:00:00.000Z",
+    "lastSuccessAt": null,
+    "staleAfterHours": 30,
+    "errorCode": "INCOMPLETE_RESPONSE",
+    "inventoryComplete": false
+  },
+  "products": [
+    {
+      "id": "hapoalim:00-000-000001%3Asecurities",
+      "provider": "hapoalim",
+      "providerProductId": "00-000-000001:securities",
+      "kind": "investment",
+      "name": "Example Hapoalim Securities",
+      "currency": "ILS",
+      "currentValuationId": null,
+      "liquidity": {
+        "status": "unknown",
+        "availableFrom": null,
+        "availableAmount": null
+      },
+      "coverage": {
+        "valuations": "partial",
+        "activities": "unavailable",
+        "tracks": "unavailable",
+        "executions": "partial"
+      },
+      "forecast": null
+    }
+  ],
+  "valuations": [
+    {
+      "id": "sure:entry:22222222-2222-4222-8222-222222222222",
+      "productId": "hapoalim:00-000-000001%3Asecurities",
+      "asOf": "2026-04-02",
+      "observedAt": "2026-09-10T09:00:00.000Z",
+      "amount": "1234.5678",
+      "currency": "ILS",
+      "provenance": {
+        "origin": "sure_archive",
+        "sourceEntryId": "22222222-2222-4222-8222-222222222222",
+        "sourceAccountId": "11111111-1111-4111-8111-111111111111",
+        "sourceSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "archiveObservedAt": "2026-09-10T09:00:00.000Z",
+        "observationBasis": "archive_read",
+        "bankObservationVerified": false,
+        "sourceAmount": "1234.5678"
+      }
+    }
+  ],
+  "activities": [],
+  "tracks": [],
+  "executions": [
+    {
+      "id": "hapoalim:00-000-000001%3Asecurities:execution:natural-key-v1%3Aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "productId": "hapoalim:00-000-000001%3Asecurities",
+      "sourceId": "natural-key-v1:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "sourceIdKind": "natural_key",
+      "kind": "buy",
+      "securityId": "EXAMPLE",
+      "isin": null,
+      "symbol": null,
+      "name": "Example security",
+      "tradeDate": "2026-03-01",
+      "valueDate": null,
+      "settlementDate": null,
+      "cancelDate": null,
+      "cancelled": false,
+      "quantity": "1.23456789",
+      "unitPrice": "1.00",
+      "netCashAmount": "-1.23",
+      "currency": "USD",
+      "settlementNetCashAmount": null,
+      "settlementCurrency": "ILS",
+      "sourceTradeType": "example",
+      "sourceTransactionType": "example",
+      "sourcePaymentType": null,
+      "observedAt": "2026-09-10T09:00:00.000Z"
+    }
+  ]
+}

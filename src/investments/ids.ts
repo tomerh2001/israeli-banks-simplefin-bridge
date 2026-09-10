@@ -34,3 +34,7 @@ export function investmentActivityId(productId: string, sourceId: string): strin
 export function investmentTrackId(productId: string, sourceTrackId: string): string {
 	return checked(`${productId}:track:${part(sourceTrackId)}`);
 }
+
+export function investmentExecutionId(productId: string, sourceId: string): string {
+	return checked(`${productId}:execution:${part(sourceId)}`);
+}

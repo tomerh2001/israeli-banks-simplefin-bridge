@@ -1,7 +1,7 @@
 import {readFile} from 'node:fs/promises';
 import path from 'node:path';
 import {z} from 'zod';
-import {bestInvestConfigSchema, investmentConfigSchema} from './investments/config.js';
+import {bestInvestConfigSchema, hapoalimInvestmentsConfigSchema, investmentConfigSchema} from './investments/config.js';
 import type {Config, RuntimeEnv} from './types.js';
 
 const accountKind = z.enum(['checking', 'credit_card', 'savings', 'investment']);
@@ -41,6 +41,7 @@ export const configSchema = z.object({
 	companies: z.record(z.string(), companySchema),
 	investments: investmentConfigSchema.optional(),
 	bestInvest: bestInvestConfigSchema.optional(),
+	hapoalimInvestments: hapoalimInvestmentsConfigSchema.optional(),
 	// `prefault` feeds the empty object through the schema so every nested default applies.
 	server: serverSchema.prefault({}),
 });

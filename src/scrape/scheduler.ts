@@ -43,6 +43,8 @@ export type SchedulerOptions = {
 	source?: Source;
 	/** Clock override (tests). */
 	now?: () => Date;
+	/** Shares a successful native Hapoalim login; never schedules or reserves another attempt. */
+	hapoalimInvestments?: SourceRunContext['hapoalimInvestments'];
 };
 
 export type RunNowOptions = {
@@ -300,6 +302,7 @@ export function createScheduler(options: SchedulerOptions): Scheduler {
 			timezone: config.timezone,
 			defaultCurrency: config.currency,
 			profileDir: ensureProfileDir(env, company),
+			hapoalimInvestments: options.hapoalimInvestments,
 		};
 		const source = options.source ?? createScraperSource(company, logger);
 		let outcome: SourceRunOutcome;

@@ -20,6 +20,7 @@ import {collectClal} from './investments/reader.js';
 import {renewClalSession} from './investments/session.js';
 import {createClalRecoveryCollector} from './investments/recovery.js';
 import {createBestInvestCollector} from './investments/best-invest/collector.js';
+import {createHapoalimInvestmentRuntime, type HapoalimInvestmentRuntime} from './investments/hapoalim/runtime.js';
 import type {CompanyId, Config, Ledger, RunRecord, RuntimeEnv, SecretsResolver} from './types.js';
 
 /** Everything a command needs to talk to the ledger and the banks. */
@@ -50,6 +51,7 @@ export type RunningBridge = {
 	scheduler: Scheduler;
 	investments?: InvestmentRuntime;
 	bestInvest?: InvestmentRuntime;
+	hapoalimInvestments?: HapoalimInvestmentRuntime;
 	/** Bound listen port. */
 	port: number;
 	/** Stop the scheduler, close the server and the ledger. Idempotent. */
@@ -157,7 +159,15 @@ export async function serve(options: ServeOptions = {}): Promise<RunningBridge> 
 	const logger = options.logger ?? createLogger('bridge');
 	const context = await openContext(logger);
 	const {config, env, ledger, secrets} = context;
-	const scheduler = createScheduler({config, env, ledger, secrets, logger: logger.child('scrape')});
+	const hapoalimInvestments = config.hapoalimInvestments?.enabled
+		? await createHapoalimInvestmentRuntime({config: config.hapoalimInvestments, env, secrets, logger: logger.child('hapoalim-investments')})
+		: undefined;
+	const scheduler = createScheduler({
+		config, env, ledger, secrets, logger: logger.child('scrape'),
+		hapoalimInvestments: hapoalimInvestments?.store && config.hapoalimInvestments
+			? {config: config.hapoalimInvestments, store: hapoalimInvestments.store}
+			: undefined,
+	});
 	const investments = config.investments?.enabled
 		? await createInvestmentRuntime({
 			config: config.investments, env, secrets, logger: logger.child('investments'), timezone: config.timezone,
@@ -171,7 +181,7 @@ export async function serve(options: ServeOptions = {}): Promise<RunningBridge> 
 		})
 		: undefined;
 	const investmentRouter = new Hono();
-	for (const runtime of [investments, bestInvest]) {
+	for (const runtime of [investments, bestInvest, hapoalimInvestments]) {
 		if (runtime) {
 			investmentRouter.route('/', runtime.router);
 		}
@@ -196,12 +206,13 @@ export async function serve(options: ServeOptions = {}): Promise<RunningBridge> 
 			bestInvest?.stop();
 			await closeWithGrace(async () => server.close(), logger);
 			await Promise.all([investments?.close(), bestInvest?.close()]);
+			hapoalimInvestments?.close();
 			context.close();
 		})();
 		return shuttingDown;
 	};
 
-	const running: RunningBridge = {context, scheduler, investments, bestInvest, port: server.port, shutdown};
+	const running: RunningBridge = {context, scheduler, investments, bestInvest, hapoalimInvestments, port: server.port, shutdown};
 	if (options.exit) {
 		installSignalHandlers(running, options.exit);
 	}

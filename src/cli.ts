@@ -34,6 +34,9 @@ import {renewClalSession} from './investments/session.js';
 import {getClalSessionStatus} from './investments/router.js';
 import {automaticClalLogin, clalSessionVerifiedCallback, createClalRecoveryCollector} from './investments/recovery.js';
 import {createBestInvestCollector} from './investments/best-invest/collector.js';
+import {loadConfig, readRuntimeEnv} from './config.js';
+import {createHapoalimInvestmentRuntime, HAPOALIM_INVESTMENTS_DATABASE} from './investments/hapoalim/runtime.js';
+import {assertHapoalimStoreOwnership, seedHapoalimArchive} from './investments/hapoalim/archive.js';
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 const ANOMALY_LIMIT = 20;
@@ -118,8 +121,20 @@ async function commandScrape(context: BridgeContext, args: ParsedArgs): Promise<
 		throw new UsageError(`Company "${company}" is disabled in the config`);
 	}
 
-	const scheduler = createScheduler({config, env, ledger, secrets, logger: logger.child('scrape')});
-	const runs = await scheduler.runNow({company, from: optionalDate(args.values.from, 'from'), force: args.values.force === true});
+	const hapoalim = config.hapoalimInvestments?.enabled
+		? await createHapoalimInvestmentRuntime({config: config.hapoalimInvestments, env, secrets, logger: logger.child('hapoalim-investments')})
+		: undefined;
+	const scheduler = createScheduler({
+		config, env, ledger, secrets, logger: logger.child('scrape'),
+		hapoalimInvestments: hapoalim?.store && config.hapoalimInvestments ? {config: config.hapoalimInvestments, store: hapoalim.store} : undefined,
+	});
+	let runs: RunRecord[];
+	try {
+		runs = await scheduler.runNow({company, from: optionalDate(args.values.from, 'from'), force: args.values.force === true});
+	} finally {
+		hapoalim?.close();
+	}
+
 	if (runs.length === 0) {
 		print('No enabled companies to scrape.');
 		return 0;
@@ -567,6 +582,11 @@ async function dispatch(context: BridgeContext, args: ParsedArgs): Promise<numbe
 		case 'serve': {
 			throw new Error('serve is handled before the ledger is opened');
 		}
+
+		case 'hapoalim-investments-seed':
+		case 'hapoalim-investments-status': {
+			throw new Error('Offline investment commands are handled before the bank ledger is opened');
+		}
 	}
 }
 
@@ -589,6 +609,48 @@ async function main(args: string[]): Promise<number | undefined> {
 	}
 
 	applyGlobalOptions(parsed.values);
+	if (parsed.command === 'hapoalim-investments-seed' || parsed.command === 'hapoalim-investments-status') {
+		const env = readRuntimeEnv();
+		const config = await loadConfig(env.configPath);
+		if (!config.hapoalimInvestments) {
+			throw new UsageError('Hapoalim investments are not configured');
+		}
+
+		if (parsed.command === 'hapoalim-investments-seed') {
+			const required = (name: 'archive' | 'source' | 'provider-product-id' | 'backup-dir'): string => {
+				const value = parsed.values[name];
+				if (typeof value !== 'string' || !value) {
+					throw new UsageError(`--${name} is required`);
+				}
+
+				return value;
+			};
+
+			const result = await seedHapoalimArchive({
+				archivePath: required('archive'), sourcePath: required('source'),
+				providerProductId: required('provider-product-id'), backupDir: required('backup-dir'), config, env,
+			});
+			print(JSON.stringify(result));
+			return 0;
+		}
+
+		const filename = path.join(env.dataDir, HAPOALIM_INVESTMENTS_DATABASE);
+		assertHapoalimStoreOwnership(filename);
+		const store = createInvestmentStore(filename, 'hapoalim');
+		try {
+			const feed = store.getFeed(new Date(), config.hapoalimInvestments.staleHours);
+			print(JSON.stringify({
+				configured: true, enabled: config.hapoalimInvestments.enabled, source: feed.source,
+				schedule: {expression: config.schedule ?? null, timezone: config.timezone, sharedWithBank: true},
+				counts: {products: feed.products.length, valuations: feed.valuations.length, executions: feed.executions?.length ?? 0},
+			}));
+			return feed.source.status === 'ok' ? 0 : 1;
+		} finally {
+			store.close();
+			assertHapoalimStoreOwnership(filename);
+		}
+	}
+
 	const logger = createLogger('bridge');
 	if (parsed.command === 'serve') {
 		await serve({logger, exit: code => process.exit(code)});
