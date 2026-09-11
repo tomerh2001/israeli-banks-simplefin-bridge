@@ -326,6 +326,24 @@ binary is missing, use the existing local Playwright installation with the
 published image's browser rather than changing the bank profile or installing
 another browser into the running service.
 
+### Evening watch — September 11, 2026
+
+The existing Securo account matched all 93 cached executions and all 16 dated
+archival valuations, including exact values, source identities and observation
+timestamps. Its current value remained unavailable, and partial history did
+not advance the source's last-success timestamp. Both native Hapoalim login
+attempts for the Jerusalem day had already been used, so the evening schedule's
+skip was expected. Preserve that allowance; neither a cached read nor a
+successful history import authorizes another bank login.
+
+Offline UI inspection found ILS display formatting for normalized
+`userBalance.onlineValue`, but no raw `PortfolioTotal`/`PortfolioOnlineValue`
+adapter or `BalanceDate`/`BalanceCacheDate` semantics. Securities-only value,
+cash exclusion, authoritative valuation date and completeness for omitted or
+non-tradable holdings remain unverified. Client refresh timestamps cannot
+establish source freshness. Resolving these gaps needs verified source mapping;
+the exhausted daily allowance does not permit another capture.
+
 ## Deployment order
 
 Deploy the updated Securo backend, worker and scheduler with its execution and

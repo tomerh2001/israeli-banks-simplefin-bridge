@@ -299,6 +299,31 @@ docker compose pull && docker compose up -d
   anomalies. Compare affected statements after an upgrade; `bridge audit` cannot identify every correction.
 - The Chrome version comes from the puppeteer base image and moves with it. Profiles survive Chrome upgrades.
 
+### Verifying the deployed application identity
+
+The image inspected on September 11, 2026 retained the Puppeteer base image's
+`org.opencontainers.image.source`, `revision` and `version` labels. Check the
+label's source repository before treating its revision as a bridge application
+commit; a base-image revision does not identify the deployed bridge code.
+
+Verify the published bridge image digest and the application source associated
+with that publication, then compare the deployed compiled modules and required
+runtime capabilities with that source. A moving `latest` tag or an inherited
+version label alone does not establish which application fixes are present.
+
+### September 11, 2026 evening watch
+
+Read-only reconciliation found all 4,335 eligible posted transactions and all
+four active source-known balances matched Securo exactly; 11 user-closed
+accounts retained their closure state. Future booking dates and pending rows
+remained excluded according to the configured policy.
+
+Best Invest recovered during its normal 03:30 Jerusalem collection, with
+`lastSuccessAt=2026-09-11T00:30:00.018Z`. Its one product, three valuations and two
+tracks matched the cached Securo import. The Hapoalim investment comparison is
+recorded in the [onboarding watch note](./hapoalim-investments.md#evening-watch--september-11-2026).
+No source collection or cached sync was needed during this watch.
+
 ## Troubleshooting
 
 | Symptom | Where to look | Fix |
