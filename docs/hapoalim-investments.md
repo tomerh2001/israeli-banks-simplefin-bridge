@@ -278,6 +278,54 @@ coverage, but unknown positions or empty security metadata cannot imply a zero
 balance. Extending current holdings/value support requires verified source
 fields and the same source-to-PR-to-published-image deployment workflow.
 
+## MyTrade bootstrap repair — September 11, 2026
+
+The morning checking collection succeeded, but investments failed after exactly
+30 seconds with `COLLECTION_FAILED` and no portfolio/history captures. A bounded
+diagnostic reproduced the failure in the existing trusted bank profile. The
+request guard blocked the SPA's `POST
+/ServerServices/mytrade/api/v2/json2/login/sso`, which exchanges the existing bank
+login for a MyTrade session. Allowing that request exposed a second required
+`POST /ServerServices/mytrade/api/v2/json2/account/init`. The bank's own
+`accountInitFromLogin` initializes the selected account's session credentials;
+these endpoints do not place trades. Allow only these exact bootstrap endpoint
+suffixes on the verified bank origin, retaining the order and unknown-write
+restrictions.
+
+Session-bearing settings requests arrive before account initialization finishes.
+The collector must wait for a successful initialization response, check its
+body for a bank error, and retain the latest observed session headers before
+reading portfolio or history. A settings request alone does not prove readiness.
+Regression tests cover the complete bootstrap-to-history flow, initialization
+failures/timeouts, pagination, and tab/listener cleanup.
+
+The corrected compiled reader fetched 93 executions in one completed cursor
+page for the configured January 1, 2023–September 11, 2026 window. Their trade
+dates span May 23, 2023–August 11, 2026. All 93 passed the existing exact-decimal
+parser and had distinct identities. A second read after closing the checking
+and diagnostic MyTrade tabs verified the normal service lifecycle. The bank
+returned the same 93 rows; no extra native bank login was made. This proves the
+returned history window, not complete lifetime history or a current valuation.
+
+The diagnostic consumed the second native Hapoalim login allowance for the
+Jerusalem day. Preserve that reservation; the September 11 evening schedule
+must skip Hapoalim. Captures and validation artifacts remain in the restricted
+`investment-onboarding/history-fix-2026-09-11` directory. Re-importing validated
+captures must preserve their actual observation timestamp and the 16 archival
+valuations; it must not refresh the checking source timestamp or invent a
+current balance. Never restore the older 52 deleted Sure funds movements as a
+substitute for bank securities history.
+
+For future bootstrap diagnosis, capture only request method/pathname, response
+status, header names and elapsed time in summaries; keep screenshots, scripts,
+raw responses and any storage details private. The bank's native pinned scraper
+can own `initialize()`/`login()` while Playwright attaches over local CDP for
+one-off inspection. This avoids the obsolete manual login-selector path from
+the September 10 diagnostic. If the browser MCP cannot start because its Chrome
+binary is missing, use the existing local Playwright installation with the
+published image's browser rather than changing the bank profile or installing
+another browser into the running service.
+
 ## Deployment order
 
 Deploy the updated Securo backend, worker and scheduler with its execution and

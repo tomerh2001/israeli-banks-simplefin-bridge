@@ -2,7 +2,7 @@
 /// <reference lib="dom" />
 /* eslint-disable @typescript-eslint/no-restricted-types -- The bank cursor explicitly distinguishes null from a live cursor. */
 // eslint-disable-next-line import-x/no-extraneous-dependencies, n/no-extraneous-import
-import type {Browser, HTTPRequest, Page} from 'puppeteer';
+import type {Browser, HTTPRequest, HTTPResponse, Page} from 'puppeteer';
 import type {InvestmentErrorCode} from '../types.js';
 
 /** Protocol reference: Urigo/accounter-fullstack@88568d9b9be1cf17a44ac070ef330de1dd3dda21, modern-poalim-scraper. */
@@ -51,7 +51,8 @@ export function hapoalimApiBase(requestUrl: string): string | undefined {
 }
 
 export function allowedMytradeRequest(requestUrl: string, method: string): boolean {
-	const pathname = new URL(requestUrl).pathname.toLowerCase();
+	const url = new URL(requestUrl);
+	const pathname = url.pathname.toLowerCase();
 	if (!pathname.includes('/mytrade/api/')) {
 		return true;
 	}
@@ -63,8 +64,12 @@ export function allowedMytradeRequest(requestUrl: string, method: string): boole
 		return false;
 	}
 
+	// The SPA exchanges the existing bank login through SSO and initializes the
+	// account before portfolio/history reads. Neither operation places an order.
+	const sessionBootstrap = url.origin === HAPOALIM_ORIGIN
+		&& ['/mytrade/api/v2/json2/login/sso', '/mytrade/api/v2/json2/account/init'].some(endpoint => pathname.endsWith(endpoint));
 	return ['GET', 'HEAD', 'OPTIONS'].includes(method)
-		|| (method === 'POST' && pathname.endsWith('/mytrade/api/v2/json2/account/view'));
+		|| (method === 'POST' && (sessionBootstrap || pathname.endsWith('/mytrade/api/v2/json2/account/view')));
 }
 
 function record(value: unknown): Record<string, unknown> {
@@ -153,18 +158,50 @@ export function parseMytradeJson(text: string): unknown {
 
 async function bootMytrade(page: Page): Promise<Session> {
 	let onRequest: (request: HTTPRequest) => void;
+	let onResponse: (response: HTTPResponse) => void;
 	let timer: ReturnType<typeof setTimeout>;
 	const sessionPromise = new Promise<Session>((resolve, reject) => {
+		let session: Session | undefined;
+		let initialized = false;
+		const finish = () => {
+			if (session && initialized) {
+				resolve(session);
+			}
+		};
+
 		timer = setTimeout(() => reject(new HapoalimInvestmentError('COLLECTION_FAILED')), 30_000);
 		onRequest = request => {
 			const url = new URL(request.url());
 			const headers = request.headers();
 			if (url.origin === HAPOALIM_ORIGIN && url.pathname.includes('/mytrade/api/') && headers.session) {
-				resolve({session: headers.session, csession: headers.csession});
+				session = {session: headers.session, csession: headers.csession};
+				finish();
 			}
 		};
 
+		onResponse = response => {
+			const url = new URL(response.url());
+			if (url.origin !== HAPOALIM_ORIGIN || !url.pathname.endsWith('/mytrade/api/v2/json2/account/init')
+				|| response.request().method() !== 'POST') {
+				return;
+			}
+
+			if (response.status() !== 200) {
+				reject(new HapoalimInvestmentError('COLLECTION_FAILED'));
+				return;
+			}
+
+			// Settings requests carry session before account initialization finishes.
+			// Wait for the SPA's successful init response, including body-level errors.
+			void response.json().then((value: unknown) => {
+				record(value);
+				initialized = true;
+				finish();
+			}).catch(() => reject(new HapoalimInvestmentError('COLLECTION_FAILED')));
+		};
+
 		page.on('request', onRequest);
+		page.on('response', onResponse);
 	});
 	void sessionPromise.catch(() => undefined);
 	try {
@@ -186,6 +223,7 @@ async function bootMytrade(page: Page): Promise<Session> {
 	} finally {
 		clearTimeout(timer!);
 		page.off('request', onRequest!);
+		page.off('response', onResponse!);
 	}
 }
 
