@@ -40,7 +40,7 @@
     "@types/node": "^26.0.0",
     "semantic-release": "^25.0.2",
     "tsx": "^4.21.0",
-    "typescript": "^6",
+    "typescript": "^7.0.0",
     "vitest": "^3.2.4",
     "xo": "^4.0.0"
   },
