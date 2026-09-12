@@ -128,9 +128,26 @@ message from being delivered again through another provider.
 Clal's existing flags, routes, template and pairing process remain unchanged.
 The shared `/healthz` endpoint describes the Google Messages connection.
 Provider health routes additionally require that provider's exact sender
-configuration and matcher; an unavailable provider returns 503. Reading health
-does not reserve or release a lease, contact the phone, or read messages.
-Callers must still successfully arm their own provider before requesting an SMS.
+configuration and matcher; missing provider configuration returns 503. A
+configured route can return HTTP200 with `online: false` and
+`state: "reauth_required"`. HTTP success establishes that the health handler
+responded, not that OTP reception is ready. Require `online: true` and
+`state: "ready"` from each provider's route. Reading health does not reserve or
+release a lease, contact the phone, or read messages. Callers must still
+successfully arm their own provider before requesting an SMS.
+
+`reauth_required` combines fatal listener errors, Google logout and revoked
+pairing events. The sanitized state alone cannot identify which occurred, and
+the receiver intentionally omits sensitive underlying library errors from logs.
+Verify private state, socket and sender-file ownership before attributing the
+problem to permissions; correct files do not prove Google authentication works.
+
+When Google reauthorization is required, stop automatic login recovery and use
+operator-assisted authentication through the existing receiver setup. Do not
+automatically remove or replace the paired session, reset pairing, widen sender
+matching or start another receiver. A container recreation is not evidence of
+restored readiness. Keep the existing session and attempt allowances intact
+until the required user action is available.
 
 ## Verified upstream entry points
 

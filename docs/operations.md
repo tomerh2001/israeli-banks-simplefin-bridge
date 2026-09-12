@@ -324,6 +324,40 @@ tracks matched the cached Securo import. The Hapoalim investment comparison is
 recorded in the [onboarding watch note](./hapoalim-investments.md#evening-watch--september-11-2026).
 No source collection or cached sync was needed during this watch.
 
+### September 12, 2026 final evening watch
+
+September 12 was the final authorized 20:00 Asia/Jerusalem check. This watch
+expires at September 13, 00:00 in that timezone; it authorizes no later checks,
+repairs or notifications and must not be extended or replaced automatically.
+
+One native cached bank sync corrected two active CAL balances and their native
+opening offsets. All 4,335 eligible posted transactions and four active
+source-known balances then matched Securo. No transactions were added, deleted
+or merged; policies and all 11 user-closed accounts were preserved. A cached
+Hapoalim investment sync refreshed observation metadata only: the financial
+fields of all 93 executions and the 16 archived valuations were unchanged.
+All investment feeds matched their stored Securo imports.
+
+Best Invest missed its 03:30 Jerusalem collection with `OTP_REQUIRED` and made
+no SMS request. Its last successful collection remains September 11 at 03:30
+Jerusalem. At the final check, all three Google Messages health routes returned
+HTTP200 but `online: false` / `reauth_required`, blocking automatic recovery for
+both Best Invest and Clal. Clal's weekly source data remained healthy. The
+receiver's private state, socket and matcher configuration had the correct
+ownership and permissions; no local permission fault was found.
+
+The Best Invest failure preceded the normal 04:01 receiver recreation. The
+receiver's exact state at 03:30 was not retained, so its current sign-in problem
+does not establish the earlier failure's cause, nor does the timing implicate
+the container update. No receiver restart, session reset, pairing or sender
+change was made during the watch. Reauthorization requires user action through
+the existing receiver setup; see the [health-state guidance](../tools/google-messages-otp/README.md#additional-investment-providers).
+
+Hapoalim's current investment value remains unknown and its source success
+unset; the latest source attempt was September 12 at 18:00:04.015 Jerusalem.
+Cached observation updates do not turn historical data into a current valuation.
+The final watch made no provider collection or SMS requests.
+
 ## Troubleshooting
 
 | Symptom | Where to look | Fix |
