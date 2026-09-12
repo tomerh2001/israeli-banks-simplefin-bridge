@@ -25,7 +25,7 @@
 
 # ---------------------------------------------------------------------------
 # Match the Puppeteer version resolved in yarn.lock; update the base and lock together.
-FROM ghcr.io/puppeteer/puppeteer:24.43.1 AS base
+FROM ghcr.io/puppeteer/puppeteer:25.10.0 AS base
 
 USER root
 
