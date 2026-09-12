@@ -326,9 +326,10 @@ No source collection or cached sync was needed during this watch.
 
 ### September 12, 2026 final evening watch
 
-September 12 was the final authorized 20:00 Asia/Jerusalem check. This watch
-expires at September 13, 00:00 in that timezone; it authorizes no later checks,
-repairs or notifications and must not be extended or replaced automatically.
+September 12 was the final authorized 20:00 Asia/Jerusalem check. The watch ends
+with this check and authorizes no later checks, repairs or notifications. It must
+not be extended or replaced automatically; the absolute deadline remains
+September 13 at 00:00 Asia/Jerusalem.
 
 One native cached bank sync corrected two active CAL balances and their native
 opening offsets. All 4,335 eligible posted transactions and four active
@@ -341,7 +342,7 @@ All investment feeds matched their stored Securo imports.
 Best Invest missed its 03:30 Jerusalem collection with `OTP_REQUIRED` and made
 no SMS request. Its last successful collection remains September 11 at 03:30
 Jerusalem. At the final check, all three Google Messages health routes returned
-HTTP200 but `online: false` / `reauth_required`, blocking automatic recovery for
+HTTP 200 but `online: false` / `reauth_required`, blocking automatic recovery for
 both Best Invest and Clal. Clal's weekly source data remained healthy. The
 receiver's private state, socket and matcher configuration had the correct
 ownership and permissions; no local permission fault was found.

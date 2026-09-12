@@ -129,7 +129,7 @@ Clal's existing flags, routes, template and pairing process remain unchanged.
 The shared `/healthz` endpoint describes the Google Messages connection.
 Provider health routes additionally require that provider's exact sender
 configuration and matcher; missing provider configuration returns 503. A
-configured route can return HTTP200 with `online: false` and
+configured route can return HTTP 200 with `online: false` and
 `state: "reauth_required"`. HTTP success establishes that the health handler
 responded, not that OTP reception is ready. Require `online: true` and
 `state: "ready"` from each provider's route. Reading health does not reserve or
