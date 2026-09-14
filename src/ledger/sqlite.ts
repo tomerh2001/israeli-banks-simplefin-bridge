@@ -8,6 +8,7 @@ import {DatabaseSync, type StatementSync, type SQLInputValue, type SQLOutputValu
 import {
 	ID_SCHEME_VERSION,
 	type Anomaly,
+	type ArchiveInstallmentPair,
 	type CompanyId,
 	type Consumer,
 	type DuplicateGroup,
@@ -22,6 +23,7 @@ import {
 	type TransactionQuery,
 	type UpsertSummary,
 } from '../types.js';
+import {resolveArchiveInstallments, preserveArchiveRaw, validateArchiveInstallmentPairs} from './archive-installments.js';
 
 const META_SCHEMA_VERSION = 'schema_version';
 const META_ID_SCHEME_VERSION = 'id_scheme_version';
@@ -435,7 +437,7 @@ function refreshTransaction(store: Store, existing: LedgerTransaction, incoming:
 		orNull(incoming.chargeDate ?? existing.chargeDate),
 		orNull(incoming.category ?? existing.category),
 		orNull(incoming.memo ?? existing.memo),
-		toJson(incoming.raw),
+		toJson(preserveArchiveRaw(existing, incoming)),
 		incoming.lastSeen,
 		orNull(existing.postedSeenAt ?? (status === existing.status ? undefined : incoming.lastSeen)),
 		existing.id,
@@ -443,19 +445,27 @@ function refreshTransaction(store: Store, existing: LedgerTransaction, incoming:
 	return changed;
 }
 
-function upsertTransactions(store: Store, rows: LedgerTransaction[]): UpsertSummary {
+function upsertTransactions(store: Store, rows: LedgerTransaction[], options?: {timezone: string}): UpsertSummary {
 	const summary: UpsertSummary = {inserted: 0, updated: 0, unchanged: 0, anomalies: []};
 	store.transaction(() => {
+		const aliases = options
+			? resolveArchiveInstallments(
+				rows,
+				store.all('SELECT * FROM transactions WHERE company = ?', 'visaCal').map(row => transactionFromRow(row)),
+				options.timezone,
+			)
+			: new Map<string, LedgerTransaction>();
 		for (const row of rows) {
 			const existingRow = store.get('SELECT * FROM transactions WHERE id = ?', row.id);
-			if (!existingRow) {
+			const existing = existingRow ? transactionFromRow(existingRow) : aliases.get(row.id);
+			if (!existing) {
 				insertTransaction(store, row);
 				summary.inserted++;
 				continue;
 			}
 
-			const existing = transactionFromRow(existingRow);
-			summary.anomalies.push(...frozenFieldAnomalies(existing, row));
+			const incoming = existing.id === row.id ? row : {...row, id: existing.id, bookedDate: existing.bookedDate};
+			summary.anomalies.push(...frozenFieldAnomalies(existing, incoming));
 			if (refreshTransaction(store, existing, row)) {
 				summary.updated++;
 			} else {
@@ -468,6 +478,30 @@ function upsertTransactions(store: Store, rows: LedgerTransaction[]): UpsertSumm
 		}
 	});
 	return summary;
+}
+
+function coalesceArchiveInstallments(store: Store, pairs: ArchiveInstallmentPair[], options: {timezone: string; dryRun: boolean}): {matched: number; coalesced: number} {
+	let count = 0;
+	store.transaction(() => {
+		const rows = store.all('SELECT * FROM transactions WHERE company = ?', 'visaCal').map(row => transactionFromRow(row));
+		const validated = validateArchiveInstallmentPairs(pairs, rows, options.timezone);
+		for (const {duplicate} of validated) {
+			if (store.get('SELECT 1 FROM synthetic_payments WHERE transaction_id = ?', duplicate.id)
+				|| store.get('SELECT 1 FROM anomalies WHERE transaction_id = ?', duplicate.id)) {
+				throw new Error('Installment duplicate has dependent ledger records; no repair applied');
+			}
+		}
+
+		if (!options.dryRun) {
+			for (const {canonical, duplicate} of validated) {
+				refreshTransaction(store, canonical, duplicate);
+				store.run('DELETE FROM transactions WHERE id = ?', duplicate.id);
+			}
+		}
+
+		count = validated.length;
+	});
+	return {matched: count, coalesced: options.dryRun ? 0 : count};
 }
 
 function listTransactions(store: Store, query: TransactionQuery): LedgerTransaction[] {
@@ -663,7 +697,8 @@ export function createSqliteLedger(path: string): Ledger {
 			return store.all('SELECT * FROM accounts WHERE (? IS NULL OR company = ?) ORDER BY id', company, company).map(row => accountFromRow(row));
 		},
 
-		upsertTransactions: rows => upsertTransactions(store, rows),
+		upsertTransactions: (rows, options) => upsertTransactions(store, rows, options),
+		coalesceArchiveInstallments: (pairs, options) => coalesceArchiveInstallments(store, pairs, options),
 		getTransaction(id) {
 			const row = store.get('SELECT * FROM transactions WHERE id = ?', id);
 			return row ? transactionFromRow(row) : undefined;

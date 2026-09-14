@@ -19,6 +19,7 @@ import type {
 	TransactionQuery,
 	UpsertSummary,
 } from '../types.js';
+import {resolveArchiveInstallments, preserveArchiveRaw, validateArchiveInstallmentPairs} from './archive-installments.js';
 
 export function createMemoryLedger(): Ledger {
 	const sourceStates = new Map<CompanyId, SourceState>();
@@ -60,10 +61,11 @@ export function createMemoryLedger(): Ledger {
 				.map(account => clone(account));
 		},
 
-		upsertTransactions(rows) {
+		upsertTransactions(rows, options) {
+			const aliases = options ? resolveArchiveInstallments(rows, [...transactions.values()], options.timezone) : new Map<string, LedgerTransaction>();
 			const summary: UpsertSummary = {inserted: 0, updated: 0, unchanged: 0, anomalies: []};
 			for (const row of rows) {
-				const existing = transactions.get(row.id);
+				const existing = transactions.get(row.id) ?? aliases.get(row.id);
 				if (!existing) {
 					transactions.set(row.id, clone(row));
 					summary.inserted++;
@@ -72,7 +74,7 @@ export function createMemoryLedger(): Ledger {
 
 				const frozen: Array<[Anomaly['field'], string, string]> = [
 					['amount', existing.amount.toFixed(2), row.amount.toFixed(2)],
-					['bookedDate', existing.bookedDate, row.bookedDate],
+					['bookedDate', existing.bookedDate, (existing.id === row.id ? row : existing).bookedDate],
 					['description', existing.description, row.description],
 				];
 				for (const [field, previous, incoming] of frozen) {
@@ -86,14 +88,14 @@ export function createMemoryLedger(): Ledger {
 					|| existing.chargeDate !== row.chargeDate
 					|| existing.category !== row.category
 					|| existing.memo !== row.memo;
-				transactions.set(row.id, clone({
+				transactions.set(existing.id, clone({
 					...existing,
 					status,
 					postedSeenAt: existing.postedSeenAt ?? (status === existing.status ? undefined : row.lastSeen),
 					chargeDate: row.chargeDate ?? existing.chargeDate,
 					category: row.category ?? existing.category,
 					memo: row.memo ?? existing.memo,
-					raw: row.raw,
+					raw: preserveArchiveRaw(existing, row),
 					lastSeen: row.lastSeen,
 				}));
 				if (changed) {
@@ -105,6 +107,29 @@ export function createMemoryLedger(): Ledger {
 
 			anomalies.push(...summary.anomalies.map(anomaly => clone(anomaly)));
 			return summary;
+		},
+		coalesceArchiveInstallments(pairs, options) {
+			const validated = validateArchiveInstallmentPairs(pairs, [...transactions.values()], options.timezone);
+			for (const {duplicate} of validated) {
+				if (syntheticPayments.some(payment => payment.transactionId === duplicate.id)
+					|| anomalies.some(anomaly => anomaly.transactionId === duplicate.id)) {
+					throw new Error('Installment duplicate has dependent ledger records; no repair applied');
+				}
+			}
+
+			if (!options.dryRun) {
+				for (const {canonical, duplicate} of validated) {
+					transactions.set(canonical.id, clone({...canonical,
+						chargeDate: duplicate.chargeDate ?? canonical.chargeDate,
+						category: duplicate.category ?? canonical.category,
+						memo: duplicate.memo ?? canonical.memo,
+						raw: preserveArchiveRaw(canonical, duplicate), lastSeen: duplicate.lastSeen,
+					}));
+					transactions.delete(duplicate.id);
+				}
+			}
+
+			return {matched: validated.length, coalesced: options.dryRun ? 0 : validated.length};
 		},
 		getTransaction: id => clone(transactions.get(id)),
 		listTransactions(query: TransactionQuery) {
