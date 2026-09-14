@@ -56,3 +56,9 @@ Clal history also includes explicit dated opening and closing balances retained 
 `bridge scrape <company> --backfill-from YYYY-MM-DD` revisits history for one explicit company without the incremental last-success-minus-overlap floor. It preserves the configured start-date floor, all parked/backoff/login-attempt guards, normal profile locks, and the scraper's provider retention limit. It cannot be combined with `--from`; ordinary `--from` continues to narrow an incremental request.
 
 In the installed `israeli-bank-scrapers` 6.12.0 implementation, CAL clamps retrieval to approximately 18 months and Hapoalim to approximately one year. Older history must come from preserved exports or budget archives. The option does not clear freshness, delete rows, reset authentication counters, or change schedules.
+
+## Image publication checks
+
+The Puppeteer base image must match the Puppeteer version actually resolved by the scraper in `yarn.lock`. Independent base-image upgrades are disabled in Renovate. When updating the scraper, update the base image in the same change and run `yarn check:browser-base`; CI runs this before merging. The image build also checks the installed driver's exact Chrome revision against the bundled binary.
+
+Semantic Release supplies `GIT_SHA` and `GIT_TAG` to the Docker build. The resulting application revision and version labels identify the published code, instead of inheriting Puppeteer's labels. Verify these labels and the immutable image digest before deployment.

@@ -20,6 +20,7 @@
     "docker:build": "docker build -t israeli-banks-simplefin-bridge:dev .",
     "lint": "xo .",
     "typecheck": "tsc --noEmit",
+    "check:browser-base": "tsx scripts/check-browser-base.ts",
     "test:unit": "vitest run",
     "test": "yarn lint && yarn typecheck && yarn test:unit"
   },
