@@ -1,4 +1,5 @@
 import type {z} from 'zod';
+import type {ManualRecoveryStatus} from './manual-recovery.js';
 import type {
 	clalSessionStateSchema,
 	investmentActivitySchema,
@@ -41,6 +42,11 @@ export type InvestmentImportSummary = {
 };
 
 export type InvestmentStore = {
+	/** Durable idempotency metadata only. Never stores an SMS code or portal credential. */
+	getManualRecoveryRequest(requestId: string): ManualRecoveryStatus | undefined;
+	getLatestManualRecoveryRequest(): ManualRecoveryStatus | undefined;
+	reserveManualRecoveryRequest(requestId: string, at: string): {created: boolean; recovery: ManualRecoveryStatus};
+	finishManualRecoveryRequest(recovery: ManualRecoveryStatus): void;
 	/** Atomic; incomplete results preserve every previously verified row. Absence never deletes a product. */
 	applySnapshot(snapshot: InvestmentSnapshot): InvestmentImportSummary;
 	/** Append reviewed offline valuations only; preserves source freshness and every existing record. */

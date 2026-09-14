@@ -82,6 +82,29 @@ describe('Clal automatic recovery configuration', () => {
 });
 
 describe('one automatic login and collection retry', () => {
+	it('uses the per-run manual source without configuring Google Messages and keeps the existing SMS budget', async () => {
+		const input = context(false);
+		const fake = driver();
+		input.manualOtpSource = fake.source;
+		const collect = vi.fn<InvestmentCollector>().mockResolvedValueOnce('auth_required').mockResolvedValueOnce('ok');
+		expect(await createClalRecoveryCollector(collect, fake)(input)).toBe('ok');
+		expect(fake.otpSource).not.toHaveBeenCalled();
+		expect(fake.sms).toHaveBeenCalledOnce();
+		expect(input.store.consumeAutomaticSmsAttempt(observedAt)).toBe(true);
+		expect(input.store.consumeAutomaticSmsAttempt(observedAt)).toBe(false);
+	});
+
+	it('does not bypass an exhausted persisted SMS budget for manual recovery', async () => {
+		const input = context(false);
+		const fake = driver();
+		input.manualOtpSource = fake.source;
+		expect(input.store.consumeAutomaticSmsAttempt(observedAt)).toBe(true);
+		expect(input.store.consumeAutomaticSmsAttempt(observedAt)).toBe(true);
+		expect(await createClalRecoveryCollector(vi.fn<InvestmentCollector>(async () => 'auth_required'), fake)(input)).toBe('auth_required');
+		expect(fake.sms).not.toHaveBeenCalled();
+		expect(fake.request.cancel).toHaveBeenCalledOnce();
+	});
+
 	it('recovers after actual authentication failure and preserves freshness until collection succeeds', async () => {
 		const input = context();
 		const before = input.store.getFeed(new Date(observedAt), 192);

@@ -51,6 +51,8 @@ export type RunNowOptions = {
 	company?: CompanyId;
 	/** Lower bound override for the scrape window (`YYYY-MM-DD`). */
 	from?: IsoDate;
+	/** Revisit history for one explicit company without the last-success overlap floor. */
+	backfillFrom?: IsoDate;
 	/** Ignore parking and backoff. The per-day login cap still applies (`bridge unpark` resets it). */
 	force?: boolean;
 };
@@ -108,18 +110,24 @@ export function unparkCompany(ledger: Ledger, company: CompanyId): boolean {
 	return true;
 }
 
-/** `max(config.startDate, lastSuccessAt - overlapDays, from)`, else `now - DEFAULT_LOOKBACK_DAYS`. */
+/** Incremental windows retain overlap; explicit backfills retain only the configured start-date floor. */
 export function computeWindowStart(input: {
 	config: CompanyConfig;
 	state: SourceState;
 	overlapDays: number;
 	from?: IsoDate;
+	backfillFrom?: IsoDate;
 	now: Date;
 }): Date {
-	const {config, state, overlapDays, from, now} = input;
+	const {config, state, overlapDays, from, backfillFrom, now} = input;
+	if (from && backfillFrom) {
+		throw new Error('Incremental and backfill date bounds cannot be combined');
+	}
+
 	const configStart = config.startDate ? new Date(`${config.startDate}T00:00:00.000Z`) : undefined;
-	const overlapStart = state.lastSuccessAt ? new Date(new Date(state.lastSuccessAt).getTime() - (overlapDays * 86_400_000)) : undefined;
-	const fromStart = from ? new Date(`${from}T00:00:00.000Z`) : undefined;
+	const overlapStart = !backfillFrom && state.lastSuccessAt ? new Date(new Date(state.lastSuccessAt).getTime() - (overlapDays * 86_400_000)) : undefined;
+	const bound = backfillFrom ?? from;
+	const fromStart = bound ? new Date(`${bound}T00:00:00.000Z`) : undefined;
 	return maxDate(configStart, overlapStart, fromStart) ?? new Date(now.getTime() - (DEFAULT_LOOKBACK_DAYS * 86_400_000));
 }
 
@@ -297,7 +305,8 @@ export function createScheduler(options: SchedulerOptions): Scheduler {
 			company,
 			config: companyConfig,
 			credentials,
-			startDate: computeWindowStart({config: companyConfig, state, overlapDays: config.overlapDays, from: runOptions.from, now: startedAt}),
+			startDate: computeWindowStart({config: companyConfig, state, overlapDays: config.overlapDays,
+				from: runOptions.from, backfillFrom: runOptions.backfillFrom, now: startedAt}),
 			env,
 			timezone: config.timezone,
 			defaultCurrency: config.currency,
@@ -325,6 +334,10 @@ export function createScheduler(options: SchedulerOptions): Scheduler {
 	};
 
 	const runNow = async (runOptions: RunNowOptions = {}): Promise<RunRecord[]> => {
+		if (runOptions.backfillFrom && (!runOptions.company || runOptions.from)) {
+			throw new Error('A history backfill requires one company and no incremental from bound');
+		}
+
 		if (running) {
 			logger.warn('scrape run already in progress; skipping this trigger');
 			return [];

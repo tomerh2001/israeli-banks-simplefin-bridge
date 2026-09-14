@@ -1,6 +1,8 @@
 import {backup, DatabaseSync} from 'node:sqlite';
 import {z} from 'zod';
+import type {ManualRecoveryStatus} from './manual-recovery.js';
 import {investmentActivityId, investmentExecutionId, investmentProductId, investmentValuationId} from './ids.js';
+import {enrichClalReportValuations} from './clal-reports.js';
 import {clalSessionStateSchema, investmentFeedSchema, investmentSnapshotSchema, investmentSourceStateSchema} from './schema.js';
 import type {
 	ClalSessionState,
@@ -17,6 +19,10 @@ import type {
 const recordKinds = ['products', 'valuations', 'activities', 'tracks', 'executions'] as const;
 type RecordKind = typeof recordKinds[number];
 type InvestmentRecord = NonNullable<InvestmentSnapshot[RecordKind]>[number];
+const recoveryStatusSchema = z.strictObject({
+	challengeId: z.uuid(), state: z.enum(['complete', 'failed', 'canceled', 'expired']),
+	expiresAt: z.null(), errorCode: z.enum(['OTP_REQUIRED', 'COLLECTION_FAILED', 'RECOVERY_CANCELED', 'OTP_EXPIRED', 'RECOVERY_INTERRUPTED']).nullable(),
+});
 
 function initialState(provider: InvestmentProvider): InvestmentSourceState {
 	return {
@@ -121,6 +127,11 @@ export function createInvestmentStore(filename: string, provider: InvestmentProv
 		);
 		CREATE TABLE IF NOT EXISTS investment_archive_evidence (
 			sha256 TEXT PRIMARY KEY,
+			json TEXT NOT NULL
+		);
+		CREATE TABLE IF NOT EXISTS investment_manual_recovery_requests (
+			id TEXT PRIMARY KEY,
+			created_at TEXT NOT NULL,
 			json TEXT NOT NULL
 		);
 		INSERT OR IGNORE INTO investment_meta (key, value) VALUES ('schema_version', '1');
@@ -243,6 +254,40 @@ export function createInvestmentStore(filename: string, provider: InvestmentProv
 	return {
 		async backup(destination): Promise<void> {
 			await backup(db, destination);
+		},
+		getManualRecoveryRequest(requestId) {
+			const row = db.prepare('SELECT json FROM investment_manual_recovery_requests WHERE id = ?').get(z.uuid().parse(requestId));
+			return row ? recoveryStatusSchema.parse(JSON.parse(String(row.json))) : undefined;
+		},
+		getLatestManualRecoveryRequest() {
+			const row = db.prepare('SELECT json FROM investment_manual_recovery_requests ORDER BY created_at DESC, rowid DESC LIMIT 1').get();
+			return row ? recoveryStatusSchema.parse(JSON.parse(String(row.json))) : undefined;
+		},
+		reserveManualRecoveryRequest(requestId, at) {
+			z.uuid().parse(requestId);
+			const timestamp = Date.parse(z.iso.datetime().parse(at));
+			db.exec('BEGIN IMMEDIATE');
+			try {
+				const row = db.prepare('SELECT json FROM investment_manual_recovery_requests WHERE id = ?').get(requestId);
+				if (row) {
+					db.exec('COMMIT');
+					return {created: false, recovery: recoveryStatusSchema.parse(JSON.parse(String(row.json)))};
+				}
+
+				// A process lost after reserving intent must not repeat an uncertain SMS.
+				const recovery: ManualRecoveryStatus = {challengeId: requestId, state: 'failed', expiresAt: null, errorCode: 'RECOVERY_INTERRUPTED'};
+				db.prepare('DELETE FROM investment_manual_recovery_requests WHERE created_at < ?').run(new Date(timestamp - 86_400_000).toISOString());
+				db.prepare('INSERT INTO investment_manual_recovery_requests (id, created_at, json) VALUES (?, ?, ?)').run(requestId, at, JSON.stringify(recovery));
+				db.exec('COMMIT');
+				return {created: true, recovery};
+			} catch (error) {
+				db.exec('ROLLBACK');
+				throw error;
+			}
+		},
+		finishManualRecoveryRequest(recovery) {
+			const validated = recoveryStatusSchema.parse(recovery);
+			db.prepare('UPDATE investment_manual_recovery_requests SET json = ? WHERE id = ?').run(JSON.stringify(validated), validated.challengeId);
 		},
 		seedArchive(input, evidence): InvestmentImportSummary {
 			const snapshot = investmentSnapshotSchema.parse(input);
@@ -425,8 +470,9 @@ export function createInvestmentStore(filename: string, provider: InvestmentProv
 					schemaVersion: 1, generatedAt: now.toISOString(),
 					source: {...readState(), staleAfterHours}, ...data,
 				});
+				const enriched = investmentFeedSchema.parse(enrichClalReportValuations(feed));
 				db.exec('COMMIT');
-				return feed;
+				return enriched;
 			} catch (error) {
 				db.exec('ROLLBACK');
 				throw error;

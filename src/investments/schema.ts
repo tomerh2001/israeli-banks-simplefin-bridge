@@ -48,7 +48,7 @@ export const investmentProductSchema = z.strictObject({
 	}),
 	coverage: z.strictObject({valuations: coverage, activities: coverage, tracks: coverage, executions: coverage.optional()}),
 	forecast: z.strictObject({monthlyPension: nonnegativeMoney, currency, asOf: date.nullable()}).nullable(),
-	/** Provider period figures only: never generate activities or add them to valuations. */
+	/** Period flows stay informational; explicit dated balances may extend valuation history. */
 	reportSummaries: z.array(investmentReportSummarySchema)
 		.refine(reports => new Set(reports.map(report => report.id)).size === reports.length, {message: 'Duplicate report identity'})
 		.optional(),

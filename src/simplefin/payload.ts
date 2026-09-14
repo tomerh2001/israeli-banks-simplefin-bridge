@@ -10,7 +10,7 @@
  * and logo calls, so returning [] there keeps those calls small.
  *
  * Window membership deviates from the spec's posted-only rule in one way: a row is
- * in the window when its booked date OR the instant the bridge first saw it (or saw it posted) falls
+ * in the window when its evidenced transaction date OR the instant the bridge first saw it (or saw it posted) falls
  * inside it. Israeli issuers publish rows days or weeks late and Securo only ever
  * rewinds 14 days, so a late row would otherwise never reach the consumer. Both
  * consumers dedup by id, so a row appearing in two windows is harmless.
@@ -38,6 +38,7 @@ import type {
 } from '../types.js';
 import {orgDomain, orgFor} from './orgs.js';
 import {calendarDateToPostedEpoch, toEpochSeconds, windowEndDate, windowStartDate} from './time.js';
+import {transactionDate, type TransactionDate} from './transaction-date.js';
 
 const defaultLogger = createLogger('simplefin:payload');
 
@@ -159,9 +160,9 @@ function orgObjectFor(company: CompanyId, companyConfig: CompanyConfig, config: 
 }
 
 /** Ledger transaction -> SimpleFIN transaction. */
-export function toSimpleFinTransaction(row: LedgerTransaction, accountCurrency: string): SimpleFinTransaction {
+export function toSimpleFinTransaction(row: LedgerTransaction, accountCurrency: string, occurrence?: TransactionDate): SimpleFinTransaction {
 	const pending = row.status === 'pending';
-	const bookedEpoch = calendarDateToPostedEpoch(row.bookedDate);
+	const bookedEpoch = calendarDateToPostedEpoch(occurrence?.date ?? row.bookedDate);
 	const description = truncate(row.description, maxDescriptionLength) || 'Transaction';
 	const installment = row.installmentNumber === undefined
 		? undefined
@@ -178,7 +179,9 @@ export function toSimpleFinTransaction(row: LedgerTransaction, accountCurrency: 
 		currency: normalizeCurrency(row.currency, accountCurrency),
 		extra: compact({
 			identifier: row.identifier,
-			charge_date: row.chargeDate,
+			charge_date: (occurrence ?? row).chargeDate,
+			transaction_date: occurrence?.kind ? occurrence.date : undefined,
+			transaction_date_kind: occurrence?.kind,
 			installment,
 			original_amount: formatOptionalNumber(row.originalAmount),
 			original_currency: row.originalCurrency,
@@ -235,21 +238,30 @@ function transactionsFor(account: LedgerAccount, currency: string, companyConfig
 		return [];
 	}
 
-	// The lower bound is applied here, not in the query, so late-arriving rows can qualify by firstSeen.
+	// Both date bounds use evidence here: frozen booked dates may be a later card bill.
 	const rows = context.ledger.listTransactions({
 		accountIds: [account.id],
-		to: window.to,
 		includePending: context.query.pending && companyConfig.includePending,
 		includeSynthetic: true,
 	});
 	return rows
-		.filter(row => window.from === undefined || row.bookedDate >= window.from || firstSeenInWindow(row, context.query))
 		.filter(row => isCurrentPending(row, account))
-		.map(row => toSimpleFinTransaction(row, currency));
+		.map(row => ({row, occurrence: transactionDate(row, context.config.timezone, account.kind === 'credit_card')}))
+		.filter(({occurrence}) => window.to === undefined || occurrence.date < window.to)
+		.filter(({row, occurrence}) => window.from === undefined || occurrence.date >= window.from || firstSeenInWindow(row, context.query))
+		.sort((a, b) => a.occurrence.date.localeCompare(b.occurrence.date) || a.row.id.localeCompare(b.row.id))
+		.map(({row, occurrence}) => toSimpleFinTransaction(row, currency, occurrence));
 }
 
 function toSimpleFinAccount(account: LedgerAccount, companyConfig: CompanyConfig, context: AccountContext): SimpleFinAccount {
 	const currency = normalizeCurrency(account.currency, context.config.currency);
+	let balanceSemantics: string | undefined;
+	if (account.company === 'visaCal' && account.kind === 'credit_card') {
+		balanceSemantics = 'next_statement_debit';
+	} else if (account.company === 'hapoalim' && account.kind === 'checking') {
+		balanceSemantics = 'balance';
+	}
+
 	// Securo logs errlist warnings but otherwise displays an unknown balance as 0.
 	// Derive the warning from current source data so its next sync clears it when a balance is reported.
 	const nameSuffix = account.balance === undefined ? ' (balance unavailable)' : '';
@@ -269,7 +281,8 @@ function toSimpleFinAccount(account: LedgerAccount, companyConfig: CompanyConfig
 		'balance-date': toEpochSeconds(account.balanceAt ?? context.now),
 		transactions: transactionsFor(account, currency, companyConfig, context),
 		holdings: context.ledger.listHoldings(account.id).map(row => toSimpleFinHolding(row, currency)),
-		extra: {kind: account.kind, company: account.company, accountNumber: account.accountNumber},
+		extra: compact({kind: account.kind, company: account.company, accountNumber: account.accountNumber,
+			balance_semantics: balanceSemantics}),
 	});
 }
 

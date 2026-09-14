@@ -1,10 +1,10 @@
 /**
  * Calendar-date <-> epoch helpers for the SimpleFIN payload.
  *
- * `posted` is always 12:00 UTC of the booked calendar date, so a consumer that
+ * `posted` is always 12:00 UTC of the transaction calendar date, so a consumer that
  * converts it to a UTC date can never shift the day. Windows (`start-date`,
  * `end-date`) are mapped back onto calendar dates with the same convention:
- * a row is in the window iff startEpoch <= posted(bookedDate) < endEpoch.
+ * a row is in the window iff startEpoch <= posted(transactionDate) < endEpoch.
  */
 
 import type {IsoDate} from '../types.js';

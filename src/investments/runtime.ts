@@ -6,8 +6,9 @@ import {redact, type Logger} from '../log.js';
 import type {RuntimeEnv, SecretsResolver} from '../types.js';
 import {ClalCollectionError, ClalProfileBusyError, type ClalBrowserOptions} from './browser.js';
 import type {InvestmentConfig} from './config.js';
-import {createInvestmentControlRouter, type InvestmentControlStatus, type InvestmentRefreshResult} from './control.js';
-import {readGoogleMessagesHealth, type GoogleMessagesHealth, type GoogleMessagesProvider} from './otp.js';
+import {createInvestmentControlRouter, type InvestmentControlStatus, type InvestmentRefreshResult, type RecoveryControlResult} from './control.js';
+import {createManualRecovery, hasManualRecoveryLease} from './manual-recovery.js';
+import {readGoogleMessagesHealth, type ClalOtpSource, type GoogleMessagesHealth, type GoogleMessagesProvider} from './otp.js';
 import {createInvestmentRouter, getClalSessionStatus} from './router.js';
 import {createInvestmentStore} from './store.js';
 import type {ClalSessionState, InvestmentProvider, InvestmentStore} from './types.js';
@@ -20,6 +21,8 @@ export type InvestmentCollectionContext = {
 	store: InvestmentStore;
 	/** Collectors must close their browser when shutdown cancels the active collection. */
 	signal: AbortSignal;
+	/** Per-request override only; scheduled collections continue to use configured automatic recovery. */
+	manualOtpSource?: ClalOtpSource;
 };
 
 export type InvestmentCollectionStatus = 'ok' | 'partial' | 'auth_required' | 'error' | 'skipped';
@@ -102,6 +105,10 @@ export async function createInvestmentRuntime(options: InvestmentRuntimeOptions)
 	let maintenanceController: AbortController | undefined;
 	let closed = false;
 	let generation = 0;
+	let manualRecovery: ReturnType<typeof createManualRecovery>;
+	const manualVerificationAvailable = Boolean(config.enabled && store && options.collect
+		&& config.credentials.id && config.credentials.phone && controlToken && controlToken.length >= 32
+		&& !/\s/.test(controlToken) && controlToken !== readToken);
 	let scheduledCollection: {
 		generation: number;
 		deadline: number;
@@ -171,8 +178,8 @@ export async function createInvestmentRuntime(options: InvestmentRuntimeOptions)
 		}
 	};
 
-	const runNow = async (): Promise<InvestmentCollectionStatus | undefined> => {
-		if (closed || running || !options.collect || !store) {
+	const runNow = async (manualOtpSource?: ClalOtpSource): Promise<InvestmentCollectionStatus | undefined> => {
+		if (closed || running || !options.collect || !store || (!manualOtpSource && hasManualRecoveryLease(provider))) {
 			return undefined;
 		}
 
@@ -182,6 +189,7 @@ export async function createInvestmentRuntime(options: InvestmentRuntimeOptions)
 		const startedGeneration = generation;
 		collectionController = new AbortController();
 		const {signal} = collectionController;
+		const recovery = manualOtpSource ? manualRecovery : undefined;
 		running = (async (): Promise<InvestmentCollectionStatus | undefined> => {
 			// Reserve this collection before waiting so another maintenance tick cannot overtake it.
 			if (maintaining) {
@@ -193,7 +201,7 @@ export async function createInvestmentRuntime(options: InvestmentRuntimeOptions)
 			}
 
 			try {
-				return await collect({config, env, secrets, logger, store: collectionStore, signal});
+				return await collect({config, env, secrets, logger, store: collectionStore, signal, ...(manualOtpSource && {manualOtpSource})});
 			} catch {
 				if (!signal.aborted) {
 					collectionStore.recordFailure({status: 'error', attemptedAt: now().toISOString(), errorCode: 'COLLECTION_FAILED'});
@@ -206,6 +214,7 @@ export async function createInvestmentRuntime(options: InvestmentRuntimeOptions)
 		try {
 			const result = await running;
 			lastResult = result ?? null;
+			recovery?.finish(result === 'ok' || result === 'partial', result === 'auth_required' ? 'OTP_REQUIRED' : 'COLLECTION_FAILED');
 			return result;
 		} finally {
 			lastFinishedAt = now().toISOString();
@@ -282,6 +291,7 @@ export async function createInvestmentRuntime(options: InvestmentRuntimeOptions)
 		scheduledCollection = undefined;
 		maintenanceController?.abort();
 		collectionController?.abort();
+		manualRecovery?.cancel();
 	};
 
 	const controlStatus = async (): Promise<InvestmentControlStatus> => {
@@ -318,6 +328,8 @@ export async function createInvestmentRuntime(options: InvestmentRuntimeOptions)
 				nextAllowedAt: socketPath ? nextAllowedAt : null,
 			},
 			session: getClalSessionStatus(store.getSessionState(), observedAt, config.sessionKeepAliveMinutes),
+			manualVerificationAvailable,
+			recovery: manualRecovery?.status() ?? store.getLatestManualRecoveryRequest() ?? null,
 		};
 	};
 
@@ -344,14 +356,96 @@ export async function createInvestmentRuntime(options: InvestmentRuntimeOptions)
 		return {result: 'started', retryAfterSeconds: 0};
 	};
 
+	const recoveryAvailability = (requestedProvider: string): Exclude<InvestmentRefreshResult, {result: string} | {error: 'refresh_rate_limited'}> | undefined => {
+		if (closed || !manualVerificationAvailable || !store) {
+			return {error: 'investment_control_unavailable'};
+		}
+
+		return requestedProvider === provider ? undefined : {error: 'source_identity_mismatch'};
+	};
+
+	const controlStartRecovery = (requestedProvider: string, requestId: string): RecoveryControlResult => {
+		const unavailable = recoveryAvailability(requestedProvider);
+		if (unavailable || !store) {
+			return unavailable ?? {error: 'investment_control_unavailable'};
+		}
+
+		if (manualRecovery?.status().challengeId === requestId) {
+			return {recovery: manualRecovery.status()};
+		}
+
+		const previous = store.getManualRecoveryRequest(requestId);
+		if (previous) {
+			return {recovery: previous};
+		}
+
+		if (running || hasManualRecoveryLease(provider)) {
+			return {error: 'recovery_in_progress'};
+		}
+
+		const allowance = store.consumeControlRefreshAttempt(now().toISOString());
+		if (!allowance.allowed) {
+			return {error: 'refresh_rate_limited', retryAfterSeconds: allowance.retryAfterSeconds};
+		}
+
+		const reservation = store.reserveManualRecoveryRequest(requestId, now().toISOString());
+		if (!reservation.created) {
+			return {recovery: reservation.recovery};
+		}
+
+		const recoveryStore = store;
+		const recovery = createManualRecovery({
+			provider, requestId, now, abort: () => collectionController?.abort(),
+			persist(status) {
+				try {
+					recoveryStore.finishManualRecoveryRequest(status);
+				} catch {
+					// The pre-start interruption tombstone still prevents an uncertain SMS retry.
+					logger.error('investment recovery outcome could not be saved');
+				}
+			},
+		});
+		if (!recovery) {
+			return {error: 'recovery_in_progress'};
+		}
+
+		manualRecovery = recovery;
+		void runNow(recovery.source).catch(() => {
+			recovery.finish(false);
+			logger.error('investment manual recovery failed');
+		});
+		return {recovery: recovery.status()};
+	};
+
+	const controlRecoveryAction = (requestedProvider: string, requestId: string, code?: string): RecoveryControlResult => {
+		const unavailable = recoveryAvailability(requestedProvider);
+		if (unavailable || !store) {
+			return unavailable ?? {error: 'investment_control_unavailable'};
+		}
+
+		if (manualRecovery?.status().challengeId === requestId) {
+			return code === undefined ? manualRecovery.cancel() : manualRecovery.submit(code);
+		}
+
+		const previous = store.getManualRecoveryRequest(requestId);
+		if (previous?.state === 'canceled' && code === undefined) {
+			return {recovery: previous};
+		}
+
+		return {error: previous?.state === 'expired' ? 'recovery_expired' : (previous ? 'recovery_not_waiting' : 'recovery_not_found')};
+	};
+
 	router.route(isBestInvest ? '/investments/best-invest/v1/control' : '/investments/v1/control', createInvestmentControlRouter({
 		controlToken, readToken, logger, status: controlStatus, refresh: controlRefresh,
+		startRecovery: controlStartRecovery,
+		submitRecovery: (requestedProvider, requestId, code) => controlRecoveryAction(requestedProvider, requestId, code),
+		cancelRecovery: (requestedProvider, requestId) => controlRecoveryAction(requestedProvider, requestId),
 	}));
 
 	return {
 		store,
 		router,
-		runNow,
+		runNow: async () => runNow(),
 		maintainSessionNow: async () => maintainSession(false),
 		start() {
 			if (closed || !config.enabled || !store) {
