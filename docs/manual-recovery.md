@@ -41,6 +41,7 @@ For credit-card transactions, the feed recovers a date from retained scraper or 
 - `extra.transaction_date`: evidenced purchase or installment occurrence date.
 - `extra.transaction_date_kind`: `purchase`, `installment_occurrence`, or `archive_purchase_or_occurrence`.
 - `extra.charge_date`: the bill date, retained separately.
+- `extra.source_provenance`: recognized archive origin (`actual_archive` or `sure_archive`) and its immutable `source_record_id` UUID, on both bank and card entries. Synthetic entries omit provenance. Full archived records, account references, and import decisions remain private to the ledger.
 
 Later CAL installments are explicitly labeled occurrences because the scraper shifts their date by the installment number. Missing or malformed evidence falls back to the frozen ledger date without claiming purchase-date evidence. Ledger IDs and stored booked dates never change. Date-window filtering uses the recovered date too, so an already-posted September purchase billed in October can be imported in September. Existing late-arrival detection remains in place.
 

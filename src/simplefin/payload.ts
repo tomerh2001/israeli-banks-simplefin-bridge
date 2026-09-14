@@ -39,6 +39,7 @@ import type {
 import {orgDomain, orgFor} from './orgs.js';
 import {calendarDateToPostedEpoch, toEpochSeconds, windowEndDate, windowStartDate} from './time.js';
 import {transactionDate, type TransactionDate} from './transaction-date.js';
+import {sourceProvenance} from './source-provenance.js';
 
 const defaultLogger = createLogger('simplefin:payload');
 
@@ -182,6 +183,7 @@ export function toSimpleFinTransaction(row: LedgerTransaction, accountCurrency: 
 			charge_date: (occurrence ?? row).chargeDate,
 			transaction_date: occurrence?.kind ? occurrence.date : undefined,
 			transaction_date_kind: occurrence?.kind,
+			source_provenance: sourceProvenance(row),
 			installment,
 			original_amount: formatOptionalNumber(row.originalAmount),
 			original_currency: row.originalCurrency,
