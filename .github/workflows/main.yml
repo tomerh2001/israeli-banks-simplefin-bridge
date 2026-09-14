@@ -33,6 +33,9 @@ jobs:
       - name: Run Test Suite
         run: yarn test
 
+      - name: Check browser base matches the installed driver
+        run: yarn check:browser-base
+
       - name: Check config.schema.json is up to date
         run: yarn schema && git diff --exit-code -- config.schema.json
 

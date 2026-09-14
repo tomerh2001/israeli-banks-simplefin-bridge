@@ -1,3 +1,10 @@
 {
-    "automerge": true
+    "automerge": true,
+    "packageRules": [
+        {
+            "description": "The browser image must match the scraper's resolved Puppeteer dependency; update both together and pass check:browser-base.",
+            "matchPackageNames": ["ghcr.io/puppeteer/puppeteer"],
+            "enabled": false
+        }
+    ]
 }

@@ -25,7 +25,7 @@
 
 # ---------------------------------------------------------------------------
 # Match the Puppeteer version resolved in yarn.lock; update the base and lock together.
-FROM ghcr.io/puppeteer/puppeteer:25.11.0 AS base
+FROM ghcr.io/puppeteer/puppeteer:24.43.1 AS base
 
 USER root
 
@@ -107,6 +107,16 @@ COPY --from=messages --chmod=0755 /out/google-messages-otp /usr/local/bin/google
 COPY tools/google-messages-otp/LICENSE /usr/share/licenses/google-messages-otp/LICENSE
 COPY --chown=pptruser:pptruser config.example.json ./
 COPY --chmod=0755 scripts/container-entrypoint.sh /usr/local/bin/bridge-entrypoint
+
+ARG GIT_SHA=development
+ARG GIT_TAG=development
+LABEL org.opencontainers.image.revision=$GIT_SHA \
+	org.opencontainers.image.version=$GIT_TAG \
+	org.opencontainers.image.source="https://github.com/tomerh2001/israeli-banks-simplefin-bridge" \
+	org.opencontainers.image.url="https://github.com/tomerh2001/israeli-banks-simplefin-bridge" \
+	org.opencontainers.image.title="israeli-banks-simplefin-bridge" \
+	org.opencontainers.image.description="Self-hosted account data collector and SimpleFIN bridge" \
+	org.opencontainers.image.licenses="MIT"
 
 ENV DATA_DIR=/app/data \
 	CONFIG_PATH=/app/config.json \
