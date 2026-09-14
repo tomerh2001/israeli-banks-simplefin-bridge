@@ -288,10 +288,11 @@ export function createBestInvestCollector(options: BestInvestCollectorOptions = 
 			}
 
 			redact(expectedIdentity);
-			const automatic = !options.readOtp && Boolean(options.otpSource ?? context.config.googleMessagesOtpSocket);
+			const automatic = Boolean(context.manualOtpSource) || (!options.readOtp && Boolean(options.otpSource ?? context.config.googleMessagesOtpSocket));
 			const loginOptions: BestInvestCollectorOptions = {
 				...options,
-				otpSource: options.otpSource ?? (automatic && context.config.googleMessagesOtpSocket
+				...(context.manualOtpSource && {readOtp: undefined, delivery: 'SMS' as const}),
+				otpSource: context.manualOtpSource ?? options.otpSource ?? (automatic && context.config.googleMessagesOtpSocket
 					? createGoogleMessagesOtpSource(context.config.googleMessagesOtpSocket, 'best-invest')
 					: undefined),
 				async beforeOtpRequest(signal) {

@@ -108,6 +108,17 @@ describe('argument parsing', () => {
 		const rendered = table(['A', 'Bee'], [['1', 'x'], ['22', 'yy']]);
 		expect(rendered.split('\n')).toEqual(['A   Bee', '--  ---', '1   x', '22  yy']);
 	});
+
+	it('accepts an explicit single-company backfill and rejects ambiguous or invalid bounds', () => {
+		expect(parseCommandLine(['scrape', 'visaCal', '--backfill-from', '2024-01-01'])).toMatchObject({command: 'scrape', company: 'visaCal', values: {'backfill-from': '2024-01-01'}});
+		for (const args of [
+			['scrape', '--backfill-from', '2024-01-01'],
+			['scrape', 'visaCal', '--backfill-from', '2024-01-01', '--from', '2026-01-01'],
+			['scrape', 'visaCal', '--backfill-from', '2026-02-31'],
+		]) {
+			expect(() => parseCommandLine(args)).toThrow(/backfill-from/);
+		}
+	});
 });
 
 describe('bridge CLI (child process)', () => {

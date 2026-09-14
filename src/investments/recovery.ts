@@ -29,7 +29,7 @@ export function clalSessionVerifiedCallback(store: InvestmentStore, signal: Abor
 /** One automatic login only. The receiver must be ready before reserving and requesting its SMS. */
 export async function automaticClalLogin(context: InvestmentCollectionContext, dependencies: ClalRecoveryDependencies = {}, onSmsAttemptReserved: () => void = () => undefined): Promise<void> {
 	const socketPath = context.config.googleMessagesOtpSocket;
-	if (!socketPath) {
+	if (!socketPath && !context.manualOtpSource) {
 		throw new ClalCollectionError('OTP_REQUIRED');
 	}
 
@@ -38,7 +38,7 @@ export async function automaticClalLogin(context: InvestmentCollectionContext, d
 	await (dependencies.login ?? assistedClalLogin)({
 		env: {...context.env, showBrowser: true}, config: context.config, secrets: context.secrets,
 		timeoutMinutes: context.config.timeoutMinutes, signal: context.signal,
-		otpSource: (dependencies.otpSource ?? createGoogleMessagesOtpSource)(socketPath),
+		otpSource: context.manualOtpSource ?? (dependencies.otpSource ?? createGoogleMessagesOtpSource)(socketPath!),
 		async beforeSmsRequest(signal) {
 			signal.throwIfAborted();
 			if (!context.store.consumeAutomaticSmsAttempt(now().toISOString())) {
@@ -56,7 +56,7 @@ export async function automaticClalLogin(context: InvestmentCollectionContext, d
 export function createClalRecoveryCollector(collect: InvestmentCollector, dependencies: ClalRecoveryDependencies = {}): InvestmentCollector {
 	return async context => {
 		const status = await collect(context);
-		if (status !== 'auth_required' || !context.config.googleMessagesOtpSocket) {
+		if (status !== 'auth_required' || (!context.config.googleMessagesOtpSocket && !context.manualOtpSource)) {
 			return status;
 		}
 

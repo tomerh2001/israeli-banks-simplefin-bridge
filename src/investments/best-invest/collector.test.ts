@@ -149,6 +149,26 @@ describe('Best Invest OTP request boundaries', () => {
 		expect(browser.goto).not.toHaveBeenCalled();
 	});
 
+	it('injects the manual source for this collection, forces SMS, and reserves the existing persistent budget', async () => {
+		const input = context();
+		const browser = {...page(), url: () => browserModule.BEST_INVEST_ORIGIN, evaluate: vi.fn()
+			.mockResolvedValueOnce(true).mockResolvedValueOnce({errorCode: 'OTP_REQUIRED'})
+			.mockResolvedValueOnce({text: '{"Policies":[]}'})};
+		const read = vi.fn(async () => '654321');
+		const cancel = vi.fn(async () => undefined);
+		input.manualOtpSource = {prepare: vi.fn(async () => ({read, cancel}))};
+		vi.mocked(withBestInvestBrowser).mockImplementation(async (_options, work) => work(browser as never, input.signal));
+		const consume = vi.spyOn(input.store, 'consumeAutomaticSmsAttempt');
+		const otherReader = vi.fn(async () => '111111');
+		expect(await createBestInvestCollector({readOtp: otherReader, delivery: 'Email'})(input)).toBe('partial');
+		expect(read).toHaveBeenCalledOnce();
+		expect(cancel).toHaveBeenCalledOnce();
+		expect(otherReader).not.toHaveBeenCalled();
+		expect(consume).toHaveBeenCalledOnce();
+		expect(browser.actions).toContain('app-identity-login-user .action-sms');
+		expect(browser.actions).not.toContain('app-identity-login-user .action-email');
+	});
+
 	it('does not send when receiver readiness fails', async () => {
 		const browser = page();
 		const input = context();

@@ -2,7 +2,9 @@
 import {createHash, timingSafeEqual} from 'node:crypto';
 import {Hono} from 'hono';
 import {bodyLimit} from 'hono/body-limit';
+import {z} from 'zod';
 import type {Logger} from '../log.js';
+import type {ManualRecoveryResult, ManualRecoveryStatus} from './manual-recovery.js';
 import type {GoogleMessagesHealth} from './otp.js';
 import type {getClalSessionStatus} from './router.js';
 import type {InvestmentCollectionStatus} from './runtime.js';
@@ -16,6 +18,8 @@ export type InvestmentControlStatus = {
 	schedule: {enabled: boolean; expression: string; description: string | null; timezone: string; nextRunAt: string | null};
 	automaticOtp: {enabled: boolean; ready: boolean; reason: GoogleMessagesHealth['reason'] | 'not_configured' | 'rate_limited'; nextAllowedAt: string | null};
 	session: ReturnType<typeof getClalSessionStatus>;
+	manualVerificationAvailable: boolean;
+	recovery: ManualRecoveryStatus | null;
 };
 
 export type InvestmentRefreshResult =
@@ -29,7 +33,12 @@ type ControlOptions = {
 	logger: Logger;
 	status(): Promise<InvestmentControlStatus>;
 	refresh(provider: string): InvestmentRefreshResult;
+	startRecovery(provider: string, requestId: string): RecoveryControlResult;
+	submitRecovery(provider: string, challengeId: string, code: string): RecoveryControlResult;
+	cancelRecovery(provider: string, challengeId: string): RecoveryControlResult;
 };
+
+export type RecoveryControlResult = ManualRecoveryResult | Exclude<InvestmentRefreshResult, {result: string}>;
 
 function digest(value: string): Uint8Array {
 	return createHash('sha256').update(value).digest();
@@ -98,5 +107,65 @@ export function createInvestmentControlRouter(options: ControlOptions): Hono {
 			return c.json({error: 'investment_control_unavailable'}, 503);
 		}
 	});
+	for (const action of ['start', 'submit', 'cancel'] as const) {
+		const route = action === 'start' ? '/recovery' : (action === 'submit' ? '/recovery/:challengeId/code' : '/recovery/:challengeId');
+		router.on(action === 'cancel' ? 'DELETE' : 'POST', route, bodyLimit({maxSize: 128, onError: c => c.json({error: 'invalid_request'}, 400)}), async c => {
+			try {
+				const provider = c.req.header('x-investment-provider') ?? '';
+				const raw = await c.req.text();
+				let result: RecoveryControlResult;
+				if (action === 'start') {
+					const body = z.strictObject({requestId: z.uuid()}).safeParse(JSON.parse(raw));
+					if (!body.success) {
+						return c.json({error: 'invalid_request'}, 400);
+					}
+
+					result = options.startRecovery(provider, body.data.requestId.toLowerCase());
+				} else {
+					const identifier = z.uuid().safeParse(c.req.param('challengeId'));
+					if (!identifier.success) {
+						return c.json({error: 'invalid_request'}, 400);
+					}
+
+					if (action === 'submit') {
+						// Exactly one literal six-digit field; no duplicate JSON keys or numeric coercion.
+						const match = /^\s*\{\s*"code"\s*:\s*"(?<code>\d{6})"\s*\}\s*$/.exec(raw);
+						if (!match) {
+							return c.json({error: 'invalid_request'}, 400);
+						}
+
+						result = options.submitRecovery(provider, identifier.data.toLowerCase(), match.groups!.code!);
+					} else {
+						if (raw && !/^\s*\{\s*\}\s*$/.test(raw)) {
+							return c.json({error: 'invalid_request'}, 400);
+						}
+
+						result = options.cancelRecovery(provider, identifier.data.toLowerCase());
+					}
+				}
+
+				if ('recovery' in result) {
+					return c.json(result, action === 'cancel' ? 200 : 202);
+				}
+
+				if (result.error === 'refresh_rate_limited') {
+					c.header('Retry-After', String(result.retryAfterSeconds));
+					return c.json(result, 429);
+				}
+
+				const status = ({investment_control_unavailable: 503, recovery_not_found: 404, recovery_expired: 410,
+					source_identity_mismatch: 409, recovery_not_waiting: 409, recovery_in_progress: 409} as const)[result.error];
+				return c.json(result, status);
+			} catch (error) {
+				if (error instanceof SyntaxError) {
+					return c.json({error: 'invalid_request'}, 400);
+				}
+
+				options.logger.error('investment recovery control unavailable');
+				return c.json({error: 'investment_control_unavailable'}, 503);
+			}
+		});
+	}
+
 	return router;
 }

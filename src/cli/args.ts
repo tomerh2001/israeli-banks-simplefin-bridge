@@ -28,7 +28,7 @@ export type Command =
 	| 'serve';
 
 export type OptionName =
-	| 'config' | 'data-dir' | 'verbose' | 'help' | 'from' | 'to' | 'force' | 'label' | 'rotate' | 'account'
+	| 'config' | 'data-dir' | 'verbose' | 'help' | 'from' | 'backfill-from' | 'to' | 'force' | 'label' | 'rotate' | 'account'
 	| 'manual-otp' | 'email' | 'archive' | 'source' | 'provider-product-id' | 'backup-dir';
 
 export type ParsedArgs = {
@@ -47,6 +47,7 @@ const OPTIONS = {
 	verbose: {type: 'boolean'},
 	help: {type: 'boolean', short: 'h'},
 	from: {type: 'string'},
+	'backfill-from': {type: 'string'},
 	to: {type: 'string'},
 	force: {type: 'boolean'},
 	label: {type: 'string'},
@@ -64,7 +65,7 @@ const GLOBAL_OPTIONS: OptionName[] = ['config', 'data-dir', 'verbose', 'help'];
 
 /** Per-command option whitelist (on top of the globals) and whether a `<company>` positional is accepted. */
 const COMMANDS: Record<Command, {options: OptionName[]; positional?: 'company'}> = {
-	scrape: {options: ['from', 'force'], positional: 'company'},
+	scrape: {options: ['from', 'backfill-from', 'force'], positional: 'company'},
 	status: {options: []},
 	'mint-token': {options: ['label', 'rotate']},
 	revoke: {options: ['label']},
@@ -92,6 +93,9 @@ Commands:
   scrape [company] [--from YYYY-MM-DD] [--force]
                           Scrape now (all enabled companies or one). --force ignores
                           parking and backoff; the per-day login cap still applies.
+  scrape <company> --backfill-from YYYY-MM-DD
+                          Revisit older history for one company, ignoring the incremental
+                          overlap floor. Configured start date, portal limits and all login guards still apply.
   status                  Per-company state, accounts and row counts, consumers,
                           the last 20 anomalies and the duplicate-group count.
   mint-token --label <name> [--rotate]
@@ -173,6 +177,18 @@ export function parseCommandLine(args: string[]): ParsedArgs | {help: true} {
 		}
 
 		throw new UsageError(`Unexpected argument "${rest.at(-1)}" for "${name}"`);
+	}
+
+	if (name === 'scrape' && values['backfill-from'] !== undefined) {
+		if (!rest[0] || values.from !== undefined) {
+			throw new UsageError('--backfill-from requires one company and cannot be combined with --from');
+		}
+
+		const date = values['backfill-from'];
+		if (typeof date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(date)
+			|| !Number.isFinite(Date.parse(date)) || new Date(date).toISOString().slice(0, 10) !== date) {
+			throw new UsageError('--backfill-from must be a valid YYYY-MM-DD date');
+		}
 	}
 
 	return {command: name, company: rest[0], values};

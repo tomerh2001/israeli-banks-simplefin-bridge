@@ -1,7 +1,8 @@
 import {ClalCollectionError} from './browser.js';
 import {clalArray, clalProductIdentity, clalRecord, parseClalDate, parseClalMoney, requireClalSuccess, type ClalPortfolioInput} from './clal-portfolio.js';
 import {investmentSnapshotSchema} from './schema.js';
-import type {InvestmentProduct, InvestmentSnapshot} from './types.js';
+import {investmentValuationId} from './ids.js';
+import type {InvestmentProduct, InvestmentSnapshot, InvestmentValuation} from './types.js';
 
 type Report = NonNullable<InvestmentProduct['reportSummaries']>[number];
 
@@ -24,7 +25,61 @@ function openingDate(rows: Report['lines']): Report['fromDate'] {
 	return parseClalDate(date);
 }
 
-/** Provider reports are informational aggregates. Never manufacture dated fees or add them to wealth. */
+function reportBalances(product: InvestmentProduct, current: InvestmentValuation, report: Report): InvestmentValuation[] {
+	// Lifetime report origins can contain template zero balances long before
+	// a policy existed. Only the actual annual period is usable.
+	if (!report.toDate || report.fromDate?.slice(0, 4) !== report.toDate.slice(0, 4)
+		|| report.toDate > current.observedAt.slice(0, 10)) {
+		return [];
+	}
+
+	return report.lines.flatMap(line => {
+		if (!/^(?:יתרת הכספים|יתרה צבורה)(?:\s|$)/u.test(line.label) || line.amount.startsWith('-')) {
+			return [];
+		}
+
+		const asOf = parseClalDate((/\b\d{2}\/\d{2}\/\d{4}\b/.exec(line.label))?.[0]);
+		const opening = line.label.includes('(פתיחה)');
+		if (!asOf || asOf !== (opening ? report.fromDate : report.toDate)) {
+			return [];
+		}
+
+		return [{id: investmentValuationId(product.id, asOf), productId: product.id, amount: line.amount,
+			asOf, observedAt: current.observedAt, currency: product.currency}];
+	});
+}
+
+/** Extract only dated balance observations; period flows never become valuations. */
+export function enrichClalReportValuations<T extends Pick<InvestmentSnapshot, 'products' | 'valuations'>>(snapshot: T): T {
+	const valuations = [...snapshot.valuations];
+	for (const product of snapshot.products) {
+		const current = snapshot.valuations.find(value => value.id === product.currentValuationId && value.productId === product.id);
+		if (product.provider !== 'clal' || !current) {
+			continue;
+		}
+
+		const candidates = (product.reportSummaries ?? []).flatMap(report => reportBalances(product, current, report));
+		for (const value of candidates) {
+			// A directly reported portfolio valuation wins over a report total
+			// for the same date, including its original identity.
+			const directlyObserved = snapshot.valuations.some(row => row.productId === product.id && row.asOf === value.asOf);
+			if (!directlyObserved) {
+				const existing = valuations.find(row => row.id === value.id);
+				if (existing && existing.amount !== value.amount) {
+					throw new ClalCollectionError('INVALID_RESPONSE');
+				}
+
+				if (!existing) {
+					valuations.push(value);
+				}
+			}
+		}
+	}
+
+	return {...snapshot, valuations};
+}
+
+/** Preserve all report totals as context; only explicit balance dates extend history. */
 export function enrichClalReports(snapshot: InvestmentSnapshot, input: Pick<ClalPortfolioInput, 'pensionDetails' | 'gemelDetails'>): InvestmentSnapshot {
 	const products = snapshot.products.map(product => ({...product}));
 	for (const [family, responses] of [
@@ -58,5 +113,5 @@ export function enrichClalReports(snapshot: InvestmentSnapshot, input: Pick<Clal
 		}
 	}
 
-	return investmentSnapshotSchema.parse({...snapshot, products});
+	return investmentSnapshotSchema.parse(enrichClalReportValuations({...snapshot, products}));
 }

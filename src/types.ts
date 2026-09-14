@@ -436,7 +436,7 @@ export type SimpleFinConnection = {
 
 export type SimpleFinTransaction = {
 	id: string;
-	/** Epoch seconds at 12:00 UTC of the booked date; 0 while pending. */
+	/** Epoch seconds at 12:00 UTC of the evidenced transaction date (booked date fallback); 0 while pending. */
 	posted: number;
 	transacted_at: number;
 	/** Signed, two decimals, negative = money out. */

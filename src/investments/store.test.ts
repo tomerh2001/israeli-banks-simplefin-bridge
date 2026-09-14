@@ -338,3 +338,21 @@ describe('investment store', () => {
 		}
 	});
 });
+
+it('reads historical report balances from cache without changing provider freshness or persisted records', () => {
+	const store = open();
+	const snapshot = fixture();
+	snapshot.products[0]!.reportSummaries = [{id: 'annual-example', title: 'Annual report', fromDate: '2026-01-01', toDate: '2026-08-31', lines: [
+		{label: 'יתרה צבורה ל- 01/01/2026 (פתיחה)', amount: '10000.00'},
+		{label: 'Reported fee', amount: '-30.00'},
+	]}];
+	store.applySnapshot(snapshot);
+	const before = store.getFeed(new Date('2026-09-08T12:00:00Z'), 24).source;
+	const feed = store.getFeed(new Date('2026-09-15T00:00:00Z'), 24);
+	expect(feed.valuations).toHaveLength(2);
+	expect(feed.valuations.find(value => value.asOf === '2026-01-01')?.amount).toBe('10000.00');
+	expect(feed.products[0]?.currentValuationId).toBe(snapshot.products[0]?.currentValuationId);
+	expect(feed.source.lastSuccessAt).toBe(observedAt);
+	expect(store.getFeed(new Date('2026-09-08T12:00:00Z'), 24).source).toEqual(before);
+	expect(store.applySnapshot(snapshot)).toMatchObject({inserted: 0, updated: 0});
+});

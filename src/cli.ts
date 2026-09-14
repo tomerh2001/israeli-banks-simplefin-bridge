@@ -130,7 +130,8 @@ async function commandScrape(context: BridgeContext, args: ParsedArgs): Promise<
 	});
 	let runs: RunRecord[];
 	try {
-		runs = await scheduler.runNow({company, from: optionalDate(args.values.from, 'from'), force: args.values.force === true});
+		runs = await scheduler.runNow({company, from: optionalDate(args.values.from, 'from'),
+			backfillFrom: optionalDate(args.values['backfill-from'], 'backfill-from'), force: args.values.force === true});
 	} finally {
 		hapoalim?.close();
 	}

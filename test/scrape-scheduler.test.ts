@@ -120,6 +120,13 @@ describe('computeWindowStart', () => {
 		const start = computeWindowStart({config: companyConfig(), state: defaultSourceState('hapoalim'), overlapDays: 30, now: T0});
 		expect(start.getTime()).toBe(T0.getTime() - (365 * 24 * HOUR));
 	});
+
+	it('widens an explicit historical backfill past last-success overlap while honoring the configured floor', () => {
+		const state = {...defaultSourceState('hapoalim'), lastSuccessAt: '2026-08-31T06:00:00.000Z'};
+		expect(computeWindowStart({config, state, overlapDays: 30, backfillFrom: '2026-03-01', now: T0}).toISOString()).toBe('2026-03-01T00:00:00.000Z');
+		expect(computeWindowStart({config, state, overlapDays: 30, backfillFrom: '2020-01-01', now: T0}).toISOString()).toBe('2026-01-01T00:00:00.000Z');
+		expect(() => computeWindowStart({config, state, overlapDays: 30, from: '2026-08-01', backfillFrom: '2026-03-01', now: T0})).toThrow(/cannot be combined/);
+	});
 });
 
 describe('createScheduler.runNow', () => {
@@ -127,6 +134,37 @@ describe('createScheduler.runNow', () => {
 
 	beforeEach(() => {
 		h = harness();
+	});
+
+	it('passes a single-provider history backfill to the existing guarded source run', async () => {
+		h.ledger.upsertSourceState({...defaultSourceState('hapoalim'), lastSuccessAt: '2026-09-01T00:00:00Z'});
+		await h.scheduler.runNow({company: 'hapoalim', backfillFrom: '2026-02-01'});
+		expect(h.source.contexts).toHaveLength(1);
+		expect(h.source.contexts[0]!.startDate.toISOString()).toBe('2026-02-01T00:00:00.000Z');
+	});
+
+	it.each(['parked', 'backoff', 'daily cap'])('preserves %s during history backfills', async guard => {
+		const state = {...defaultSourceState('hapoalim'), lastSuccessAt: '2026-09-01T00:00:00Z'};
+		if (guard === 'parked') {
+			state.parked = true;
+		} else if (guard === 'backoff') {
+			state.nextAllowedAt = '2026-09-06T00:00:00Z';
+		} else {
+			state.loginAttempts = h.config.maxLoginAttemptsPerDay;
+			state.loginAttemptsDate = '2026-09-05';
+		}
+
+		h.ledger.upsertSourceState(state);
+		const runs = await h.scheduler.runNow({company: 'hapoalim', backfillFrom: '2026-02-01'});
+		expect(runs[0]!.status).toBe('skipped');
+		expect(h.source.contexts).toHaveLength(0);
+	});
+
+	it('rejects an ambiguous backfill before consuming any source login attempt', async () => {
+		await expect(h.scheduler.runNow({backfillFrom: '2026-02-01'})).rejects.toThrow(/one company/);
+		await expect(h.scheduler.runNow({company: 'hapoalim', from: '2026-08-01', backfillFrom: '2026-02-01'})).rejects.toThrow(/one company/);
+		expect(h.source.contexts).toHaveLength(0);
+		expect(h.ledger.getSourceState('hapoalim')).toBeUndefined();
 	});
 
 	it('runs enabled companies, persists rows and records the run', async () => {
