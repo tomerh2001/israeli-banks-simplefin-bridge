@@ -29,9 +29,9 @@ export function transactionDate(row: LedgerTransaction, timezone: string, credit
 	const raw = object(row.raw);
 	const migration = object(raw?.archiveMigration);
 	// Some Actual imports copied purchase date into booked/charge date solely for stable IDs.
-	const chargeDate = migration
+	const chargeDate = sourceDate(raw?.processedDate, timezone) ?? (migration
 		? (migration.dateBasis === 'source_processed_date' ? sourceDate(object(migration.sourceRecord)?.booked_date, timezone) : undefined)
-		: row.chargeDate;
+		: row.chargeDate);
 	const purchase = sourceDate(raw?.date, timezone);
 	if (purchase) {
 		// CAL moves later installments by installment-number-minus-one months.

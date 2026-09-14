@@ -389,3 +389,48 @@ path (`@puppeteer/browsers/lib/cjs/install.js` -> `fileUtil.js`). This deploymen
 path. Routine bridge scraping does not invoke that archive installer. This limits exposure for the deployed
 path; it does not remove the vulnerable dependency. Recheck the advisory when updating the scraper/browser
 packages or changing browser installation behavior.
+
+## Archived card installments rediscovered by the portal
+
+A historical archive can know an installment occurrence while lacking its
+statement date. A later CAL scrape can therefore calculate a different
+transaction hash for that same occurrence. The ledger now preserves the
+archived canonical ID when a posted portal installment has one unambiguous
+match on account, source identifier, local occurrence date, signed amount,
+currency, exact description, installment number and total. The archived source
+record must also contain a valid immutable row UUID and matching identity
+fields. Missing, conflicting or ambiguous evidence is never merged by amount
+alone. Two different portal rows cannot consume one archived occurrence.
+
+Normal collection passes the configured timezone to this matcher. Frozen ID,
+amount, booked date and description remain unchanged. The incoming portal's
+observed statement date is refreshable billing metadata; the source's original
+archive wrapper remains in raw data through subsequent refreshes. SimpleFIN
+continues to expose the canonical ID, actual purchase or installment occurrence,
+separately observed billing date, and minimal archive provenance. This does not
+change account balances or mark a source freshly collected.
+
+Previously stored duplicate IDs require explicit reviewed maintenance. The
+ledger method is:
+
+```ts
+ledger.coalesceArchiveInstallments(pairs, {timezone, dryRun: true});
+```
+
+Each pair contains `canonicalId`, `duplicateId`, `canonicalStateHash` and
+`duplicateStateHash`. Obtain the full row hashes with
+`archiveInstallmentStateHash` from `dist/ledger/archive-installments.js` after
+reading the exact rows. First retain a protected full ledger backup and complete
+before evidence, including both raw source records. The method requires distinct
+IDs, validates the entire bounded set and all hashes, rejects ambiguous identity
+or dependent anomaly/synthetic-payment records, and defaults to no behavior at
+startup: nothing invokes maintenance automatically. `dryRun: true` validates
+without modifying rows; explicit `dryRun: false` performs the reviewed merges in
+one SQLite transaction and returns `{matched, coalesced}`.
+
+Retain the removed source rows in the private maintenance journal and compare
+all other rows and account/source state after repair. Verify the cached feed
+contains the canonical IDs with correct billing metadata and omits the removed
+aliases before importing again. Replaying a stale maintenance plan fails, while
+future matching portal scrapes continue using the archived canonical IDs. No
+bank sign-in is required for this cached repair.

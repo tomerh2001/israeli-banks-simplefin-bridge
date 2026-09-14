@@ -313,6 +313,13 @@ export type Consumer = {
 // Ledger interface (implemented by src/ledger/sqlite.ts; src/ledger/memory.ts is the test fake)
 // ---------------------------------------------------------------------------
 
+export type ArchiveInstallmentPair = {
+	canonicalId: string;
+	duplicateId: string;
+	canonicalStateHash: string;
+	duplicateStateHash: string;
+};
+
 export type Ledger = {
 	// Source state + runs
 	getSourceState(company: CompanyId): SourceState | undefined;
@@ -333,7 +340,9 @@ export type Ledger = {
 	 * only lastSeen, status (pending -> posted), chargeDate, category, memo and raw are refreshed.
 	 * Differences in frozen fields are returned as anomalies and NOT applied.
 	 */
-	upsertTransactions(rows: LedgerTransaction[]): UpsertSummary;
+	upsertTransactions(rows: LedgerTransaction[], options?: {timezone: string}): UpsertSummary;
+	/** Explicit, hash-guarded repair only; dryRun validates the whole set without changing rows. */
+	coalesceArchiveInstallments(pairs: ArchiveInstallmentPair[], options: {timezone: string; dryRun: boolean}): {matched: number; coalesced: number};
 	getTransaction(id: string): LedgerTransaction | undefined;
 	listTransactions(query: TransactionQuery): LedgerTransaction[];
 	/** Rows sharing (accountId, bookedDate, amount, description) under different ids. */

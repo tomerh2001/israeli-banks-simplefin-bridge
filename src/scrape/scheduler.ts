@@ -212,7 +212,7 @@ export function createScheduler(options: SchedulerOptions): Scheduler {
 		}
 
 		// Both ledger implementations append the anomalies to their log inside upsertTransactions.
-		const summary = ledger.upsertTransactions(result.transactions);
+		const summary = ledger.upsertTransactions(result.transactions, {timezone: config.timezone});
 		if (summary.anomalies.length > 0) {
 			log.warn('frozen fields came back different; anomalies recorded, stored values kept', {anomalies: summary.anomalies.length});
 		}
