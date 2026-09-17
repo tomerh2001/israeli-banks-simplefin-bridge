@@ -31,8 +31,16 @@ USER root
 
 # Assisted login (bridge login <company>) runs Chrome headed under Xvfb and
 # exposes it through noVNC; the packages are small enough to keep in the base.
+# Refresh affected inherited Bookworm packages without changing bundled Chrome.
 RUN apt-get update \
 	&& apt-get install -y --no-install-recommends xvfb xauth tini x11vnc novnc websockify \
+	&& security_packages="$(dpkg-query -W -f='${binary:Package}\t${source:Package}\n' \
+		| awk '$2 == "imagemagick" || $2 == "gnutls28" || $2 == "mariadb" {print $1}')" \
+	&& test -n "$security_packages" \
+	&& apt-get install -y --no-install-recommends --only-upgrade $security_packages \
+	&& dpkg --compare-versions "$(dpkg-query -W -f='${Version}' imagemagick)" ge '8:6.9.11.60+dfsg-1.6+deb12u12' \
+	&& dpkg --compare-versions "$(dpkg-query -W -f='${Version}' libgnutls30)" ge '3.7.9-2+deb12u7' \
+	&& dpkg --compare-versions "$(dpkg-query -W -f='${Version}' libmariadb3)" ge '1:10.11.18-0+deb12u1' \
 	&& apt-get clean \
 	&& rm -rf /var/lib/apt/lists/*
 

@@ -49,6 +49,11 @@ jobs:
         working-directory: tools/google-messages-otp
         run: go test -race ./... && go vet ./...
 
+      - name: Build and verify the runtime image without provider access
+        run: |
+          docker build --pull -t bridge-ci:local .
+          bash scripts/smoke-image-browser.sh bridge-ci:local
+
   release:
     if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
     needs: validate
